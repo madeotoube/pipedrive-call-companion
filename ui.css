@@ -25,14 +25,15 @@
 
 .cc-panel {
   position: fixed;
-  top: 76px;
-  right: 14px;
-  width: 380px;
-  max-height: calc(100vh - 88px);
+  top: 0;
+  right: 0;
+  width: min(460px, 92vw);
+  height: 100vh;
+  max-height: 100vh;
   background: linear-gradient(180deg, var(--pa-bg-top) 0%, var(--pa-bg-bottom) 100%);
   color: var(--pa-text);
   border: 1px solid var(--pa-border);
-  border-radius: 16px;
+  border-radius: 0;
   box-shadow: 0 14px 34px rgba(15, 31, 25, 0.2);
   pointer-events: auto;
   display: flex;
@@ -43,7 +44,7 @@
 }
 
 .cc-panel-hidden {
-  transform: translateX(110%);
+  transform: translateX(100%);
   opacity: 0;
 }
 
@@ -290,20 +291,29 @@
 
 .cc-launcher {
   position: fixed;
-  right: 14px;
-  bottom: 14px;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
   pointer-events: auto;
   border: 1px solid #a5501f;
-  border-radius: 12px;
+  border-right: 0;
+  border-radius: 10px 0 0 10px;
   background: linear-gradient(180deg, #d66a2b 0%, #b9561d 100%);
   color: #fff;
-  padding: 11px 13px;
-  font-size: 14px;
+  min-width: 36px;
+  min-height: 52px;
+  padding: 6px 8px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.3px;
-  cursor: pointer;
+  cursor: grab;
   box-shadow: 0 12px 20px rgba(104, 53, 24, 0.24);
   font-family: var(--pa-font-ui);
+  white-space: nowrap;
+}
+
+.cc-launcher:active {
+  cursor: grabbing;
 }
 
 .cc-launcher-hidden {

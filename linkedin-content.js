@@ -1,8 +1,19 @@
 const HOST_ID = "peak-access-linkedin-host";
 const SHADOW_WRAPPER_CLASS = "pa-linkedin-wrapper";
+const LINKEDIN_LAUNCHER_TOP_KEY = "linkedInModeLauncherTop";
 const STATE = {
   mounted: false,
   shadowRoot: null,
+  launcherWrapper: null,
+  launcherTop: null,
+  launcherHandlersInstalled: false,
+  suppressLauncherClick: false,
+  drag: {
+    active: false,
+    startY: 0,
+    startTop: 0,
+    moved: false
+  },
   drawerVisible: false,
   fallback: {
     context: null,
@@ -63,6 +74,8 @@ function initLinkedInBridge() {
   if (STATE.mounted) return;
   STATE.mounted = true;
 
+  restoreLinkedInLauncherTop();
+  installLauncherDragHandlers();
   injectShadowWidget();
   watchUrlChanges();
 }
@@ -85,6 +98,7 @@ function injectShadowWidget() {
 
   const wrapper = document.createElement("div");
   wrapper.className = SHADOW_WRAPPER_CLASS;
+  STATE.launcherWrapper = wrapper;
 
   const style = document.createElement("style");
   style.textContent = `
@@ -94,62 +108,68 @@ function injectShadowWidget() {
 
     .${SHADOW_WRAPPER_CLASS} {
       position: fixed;
-      right: 14px;
-      bottom: 14px;
+      right: 0;
+      top: 50%;
+      transform: translateY(-50%);
       z-index: 2147483647 !important;
       pointer-events: auto;
       font-family: "Open Sans", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      background: rgba(64, 60, 54, 0.95);
-      color: #f8f6f2;
-      border: 1px solid rgba(214, 106, 43, 0.74);
-      border-radius: 999px;
-      padding: 7px 11px;
-      box-shadow: 0 12px 20px rgba(0, 0, 0, 0.24);
+      display: block;
+      background: transparent;
+      color: #fff;
+      border: 0;
+      border-radius: 0;
+      padding: 0;
+      box-shadow: none;
     }
 
     .${SHADOW_WRAPPER_CLASS} button {
-      border: 0;
-      border-radius: 999px;
-      padding: 6px 11px;
-      font-size: 14px;
+      border: 1px solid rgba(214, 106, 43, 0.74);
+      border-right: 0;
+      border-radius: 10px 0 0 10px;
+      min-width: 36px;
+      min-height: 52px;
+      padding: 6px 8px;
+      font-size: 12px;
       font-weight: 700;
-      cursor: pointer;
+      cursor: grab;
       color: #fff;
       background: linear-gradient(180deg, #d66a2b 0%, #b9561d 100%);
+      box-shadow: 0 12px 20px rgba(0, 0, 0, 0.24);
+      white-space: nowrap;
     }
 
-    .${SHADOW_WRAPPER_CLASS} .meta {
-      font-size: 13px;
-      opacity: 0.9;
-      white-space: nowrap;
-      max-width: 280px;
-      overflow: hidden;
-      text-overflow: ellipsis;
+    .${SHADOW_WRAPPER_CLASS} button:active {
+      cursor: grabbing;
     }
 
     .pa-drawer {
       position: fixed;
-      right: 8px;
-      bottom: 60px;
-      width: min(430px, calc(100vw - 16px));
-      height: min(86vh, calc(100vh - 32px));
-      max-height: calc(100vh - 24px);
+      right: 0;
+      top: 0;
+      width: min(460px, 92vw);
+      height: 100vh;
+      max-height: 100vh;
       background: linear-gradient(180deg, #f8f6f2 0%, #f1ede6 100%);
       border: 1px solid #c9c1b6;
-      border-radius: 14px;
+      border-radius: 0;
       box-shadow: 0 18px 30px rgba(0, 0, 0, 0.26);
       overflow: hidden;
-      display: none;
+      display: flex;
       z-index: 2147483647 !important;
-      pointer-events: auto;
+      pointer-events: none;
       flex-direction: column;
+      transform: translateX(100%);
+      opacity: 0;
+      visibility: hidden;
+      transition: transform 180ms ease, opacity 180ms ease;
     }
 
     .pa-drawer-visible {
-      display: flex;
+      transform: translateX(0);
+      opacity: 1;
+      visibility: visible;
+      pointer-events: auto;
     }
 
     .pa-drawer-header {
@@ -178,31 +198,14 @@ function injectShadowWidget() {
     .pa-body {
       flex: 1 1 auto;
       min-height: 0;
-      font-size: 14px;
-      color: #2c2a27;
-      display: flex;
-      flex-direction: column;
-      background: transparent;
-    }
-
-    .pa-scroll {
-      flex: 1 1 auto;
-      min-height: 0;
       overflow: auto;
       overscroll-behavior: contain;
       padding: 11px;
+      font-size: 14px;
+      color: #2c2a27;
       display: grid;
       gap: 11px;
-    }
-
-    .pa-footer {
-      flex: 0 0 auto;
-      border-top: 1px solid #d7d0c5;
-      background: linear-gradient(180deg, rgba(248, 246, 242, 0.95) 0%, rgba(241, 237, 230, 0.98) 100%);
-      backdrop-filter: blur(4px);
-      padding: 11px;
-      display: grid;
-      gap: 11px;
+      background: transparent;
     }
 
     .pa-section {
@@ -342,21 +345,20 @@ function injectShadowWidget() {
 
   const button = document.createElement("button");
   button.type = "button";
-  button.textContent = "LinkedIn Mode";
+  button.textContent = "LI";
+  button.title = "LinkedIn Mode";
+  button.setAttribute("aria-label", "Open LinkedIn Mode");
   button.addEventListener("click", () => {
-    chrome.runtime.sendMessage({ type: "OPEN_LINKEDIN_SIDE_PANEL" }, (response) => {
-      if (chrome.runtime.lastError || !response?.ok) {
-        toggleFallbackDrawer();
-      }
-    });
+    if (STATE.suppressLauncherClick) {
+      STATE.suppressLauncherClick = false;
+      return;
+    }
+    toggleFallbackDrawer();
   });
-
-  const meta = document.createElement("div");
-  meta.className = "meta";
-  meta.textContent = buildMetaText();
+  button.addEventListener("mousedown", onLinkedInLauncherMouseDown);
 
   wrapper.appendChild(button);
-  wrapper.appendChild(meta);
+  applyLinkedInLauncherPosition();
   shadow.appendChild(style);
   shadow.appendChild(wrapper);
   const drawer = createFallbackDrawer();
@@ -421,52 +423,48 @@ function createFallbackDrawer() {
   const body = document.createElement("div");
   body.className = "pa-body";
   body.innerHTML = `
-    <div class="pa-scroll">
-      <div class="pa-top-actions">
-        <button id="paRefreshBtn" class="pa-secondary" type="button">Refresh</button>
+    <div class="pa-top-actions">
+      <button id="paRefreshBtn" class="pa-secondary" type="button">Refresh</button>
+    </div>
+    <section class="pa-section">
+      <h3>Detected LinkedIn Context</h3>
+      <div id="paContextCard" class="pa-card"></div>
+    </section>
+    <section class="pa-section">
+      <h3>Pipedrive Match</h3>
+      <div id="paMatchCard" class="pa-card"></div>
+      <div class="pa-row">
+        <input id="paSearchName" class="pa-input" type="text" placeholder="Search Pipedrive person by name" />
+        <button id="paSearchBtn" class="pa-secondary" type="button">Search</button>
       </div>
-      <section class="pa-section">
-        <h3>Detected LinkedIn Context</h3>
-        <div id="paContextCard" class="pa-card"></div>
-      </section>
-      <section class="pa-section">
-        <h3>Pipedrive Match</h3>
-        <div id="paMatchCard" class="pa-card"></div>
-        <div class="pa-row">
-          <input id="paSearchName" class="pa-input" type="text" placeholder="Search Pipedrive person by name" />
-          <button id="paSearchBtn" class="pa-secondary" type="button">Search</button>
-        </div>
-        <div id="paCandidateList" class="pa-list"></div>
-      </section>
-      <section class="pa-section">
-        <h3>Sequence & Templates</h3>
-        <select id="paSequenceSelect" class="pa-select"></select>
-        <input id="paStageInput" class="pa-input" type="number" min="1" step="1" />
-        <div id="paTemplateList" class="pa-list"></div>
-      </section>
-      <section class="pa-section">
-        <div class="pa-section-head">
-          <h3>Talking Points</h3>
-          <button id="paTalkingToggle" class="pa-secondary" type="button" aria-expanded="false">Show</button>
-        </div>
-        <div id="paTalkingPoints" class="pa-list pa-collapsed"></div>
-      </section>
-    </div>
-    <div class="pa-footer">
-      <section class="pa-section">
-        <h3>Composer</h3>
-        <textarea id="paDraftText" class="pa-textarea" placeholder="Template text appears here"></textarea>
-        <div class="pa-row">
-          <button id="paInsertBtn" class="pa-primary" type="button">Insert Template</button>
-          <button id="paCopyBtn" class="pa-secondary" type="button">Copy</button>
-          <button id="paLogBtn" class="pa-primary pa-full" type="button">Log & Advance</button>
-        </div>
-      </section>
-      <section class="pa-section">
-        <h3>Status</h3>
-        <div id="paStatus" class="pa-card">Idle.</div>
-      </section>
-    </div>
+      <div id="paCandidateList" class="pa-list"></div>
+    </section>
+    <section class="pa-section">
+      <h3>Sequence & Templates</h3>
+      <select id="paSequenceSelect" class="pa-select"></select>
+      <input id="paStageInput" class="pa-input" type="number" min="1" step="1" />
+      <div id="paTemplateList" class="pa-list"></div>
+    </section>
+    <section class="pa-section">
+      <div class="pa-section-head">
+        <h3>Talking Points</h3>
+        <button id="paTalkingToggle" class="pa-secondary" type="button" aria-expanded="false">Show</button>
+      </div>
+      <div id="paTalkingPoints" class="pa-list pa-collapsed"></div>
+    </section>
+    <section class="pa-section">
+      <h3>Composer</h3>
+      <textarea id="paDraftText" class="pa-textarea" placeholder="Template text appears here"></textarea>
+      <div class="pa-row">
+        <button id="paInsertBtn" class="pa-primary" type="button">Insert Template</button>
+        <button id="paCopyBtn" class="pa-secondary" type="button">Copy</button>
+        <button id="paLogBtn" class="pa-primary pa-full" type="button">Log & Advance</button>
+      </div>
+    </section>
+    <section class="pa-section">
+      <h3>Status</h3>
+      <div id="paStatus" class="pa-card">Idle.</div>
+    </section>
   `;
 
   header.appendChild(brand);
@@ -485,6 +483,78 @@ function toggleFallbackDrawer() {
   if (STATE.drawerVisible) {
     refreshFallbackData();
   }
+}
+
+function installLauncherDragHandlers() {
+  if (STATE.launcherHandlersInstalled) return;
+  STATE.launcherHandlersInstalled = true;
+  window.addEventListener("mousemove", onLinkedInLauncherMouseMove);
+  window.addEventListener("mouseup", onLinkedInLauncherMouseUp);
+}
+
+function onLinkedInLauncherMouseDown(event) {
+  if (event.button !== 0) return;
+  STATE.drag.active = true;
+  STATE.drag.startY = event.clientY;
+  STATE.drag.startTop = getCurrentLinkedInLauncherTop();
+  STATE.drag.moved = false;
+}
+
+function onLinkedInLauncherMouseMove(event) {
+  if (!STATE.drag.active || !STATE.launcherWrapper) return;
+  const deltaY = event.clientY - STATE.drag.startY;
+  if (Math.abs(deltaY) > 3) {
+    STATE.drag.moved = true;
+  }
+
+  const nextTop = clampLinkedInLauncherTop(STATE.drag.startTop + deltaY);
+  STATE.launcherTop = nextTop;
+  STATE.launcherWrapper.style.top = `${Math.round(nextTop)}px`;
+  STATE.launcherWrapper.style.transform = "none";
+}
+
+function onLinkedInLauncherMouseUp() {
+  if (!STATE.drag.active) return;
+  STATE.drag.active = false;
+
+  if (STATE.drag.moved) {
+    STATE.suppressLauncherClick = true;
+    saveLinkedInLauncherTop();
+  }
+}
+
+function getCurrentLinkedInLauncherTop() {
+  if (STATE.launcherTop !== null) return STATE.launcherTop;
+  const rect = STATE.launcherWrapper?.getBoundingClientRect();
+  if (!rect) return window.innerHeight * 0.5;
+  return rect.top + rect.height * 0.5;
+}
+
+function clampLinkedInLauncherTop(value) {
+  const min = 44;
+  const max = Math.max(min, window.innerHeight - 44);
+  return Math.min(max, Math.max(min, Number(value) || min));
+}
+
+function applyLinkedInLauncherPosition() {
+  if (!STATE.launcherWrapper) return;
+  if (!Number.isFinite(STATE.launcherTop)) return;
+  STATE.launcherWrapper.style.top = `${Math.round(STATE.launcherTop)}px`;
+  STATE.launcherWrapper.style.transform = "none";
+}
+
+function restoreLinkedInLauncherTop() {
+  chrome.storage.local.get([LINKEDIN_LAUNCHER_TOP_KEY], (result) => {
+    const saved = Number(result[LINKEDIN_LAUNCHER_TOP_KEY]);
+    if (!Number.isFinite(saved)) return;
+    STATE.launcherTop = clampLinkedInLauncherTop(saved);
+    applyLinkedInLauncherPosition();
+  });
+}
+
+function saveLinkedInLauncherTop() {
+  if (!Number.isFinite(STATE.launcherTop)) return;
+  chrome.storage.local.set({ [LINKEDIN_LAUNCHER_TOP_KEY]: Math.round(STATE.launcherTop) });
 }
 
 function updateDrawerState() {
@@ -705,9 +775,16 @@ async function refreshFallbackData() {
 
   STATE.fallback.sequences = sequencesResponse.data?.sequences || [];
   renderSequenceSelect(drawer);
-  if (!STATE.fallback.selectedSequenceId && STATE.fallback.sequences.length) {
-    STATE.fallback.selectedSequenceId =
-      STATE.fallback.match?.sequenceId || STATE.fallback.sequences[0].id;
+  if (STATE.fallback.sequences.length) {
+    const recommended = String(STATE.fallback.match?.sequenceId || "").trim();
+    const current = String(STATE.fallback.selectedSequenceId || "").trim();
+    const hasCurrent = STATE.fallback.sequences.some((sequence) => sequence.id === current);
+    const hasRecommended = STATE.fallback.sequences.some((sequence) => sequence.id === recommended);
+    STATE.fallback.selectedSequenceId = hasCurrent
+      ? current
+      : hasRecommended
+        ? recommended
+        : STATE.fallback.sequences[0].id;
   }
   const sequenceSelect = drawer.querySelector("#paSequenceSelect");
   if (sequenceSelect) sequenceSelect.value = STATE.fallback.selectedSequenceId;

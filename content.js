@@ -5,6 +5,7 @@ const STORAGE_OPTIONS_KEY = {
   showActivities: true
 };
 const QUICK_NOTES_PREFIX = "callCompanion:quickNotes:";
+const LAUNCHER_TOP_KEY = "callCompanionLauncherTop";
 
 let rootEl = null;
 let panelEl = null;
@@ -24,6 +25,14 @@ let watcherTimer = null;
 let notesSaveTimer = null;
 let manualPanelHidden = false;
 let lastContextKey = "";
+let launcherTop = null;
+let dragState = {
+  active: false,
+  startY: 0,
+  startTop: 0,
+  moved: false
+};
+let suppressLauncherClick = false;
 
 init();
 
@@ -45,12 +54,24 @@ function ensureUI() {
   launcherEl = document.createElement("button");
   launcherEl.className = "cc-launcher";
   launcherEl.type = "button";
-  launcherEl.textContent = "Call Companion";
-  launcherEl.addEventListener("click", () => openPanel());
+  launcherEl.textContent = "CC";
+  launcherEl.title = "Call Companion";
+  launcherEl.setAttribute("aria-label", "Open Call Companion");
+  launcherEl.addEventListener("click", () => {
+    if (suppressLauncherClick) {
+      suppressLauncherClick = false;
+      return;
+    }
+    openPanel();
+  });
+  launcherEl.addEventListener("mousedown", onLauncherMouseDown);
 
   rootEl.appendChild(panelEl);
   rootEl.appendChild(launcherEl);
   document.body.appendChild(rootEl);
+  window.addEventListener("mousemove", onLauncherMouseMove);
+  window.addEventListener("mouseup", onLauncherMouseUp);
+  restoreLauncherTop();
 }
 
 async function runDetection(isInitial) {
@@ -713,6 +734,68 @@ function hideAll() {
   if (launcherEl) {
     launcherEl.classList.remove("cc-launcher-hidden");
   }
+}
+
+function onLauncherMouseDown(event) {
+  if (!launcherEl || event.button !== 0) return;
+
+  dragState.active = true;
+  dragState.startY = event.clientY;
+  dragState.startTop = getCurrentLauncherTop();
+  dragState.moved = false;
+}
+
+function onLauncherMouseMove(event) {
+  if (!dragState.active || !launcherEl) return;
+
+  const deltaY = event.clientY - dragState.startY;
+  if (Math.abs(deltaY) > 3) {
+    dragState.moved = true;
+  }
+
+  const nextTop = clampLauncherTop(dragState.startTop + deltaY);
+  launcherTop = nextTop;
+  launcherEl.style.top = `${Math.round(nextTop)}px`;
+  launcherEl.style.transform = "none";
+}
+
+function onLauncherMouseUp() {
+  if (!dragState.active) return;
+  dragState.active = false;
+
+  if (dragState.moved) {
+    suppressLauncherClick = true;
+    saveLauncherTop();
+  }
+}
+
+function getCurrentLauncherTop() {
+  if (launcherTop !== null) return launcherTop;
+  const rect = launcherEl?.getBoundingClientRect();
+  if (!rect) return window.innerHeight * 0.5;
+  return rect.top + rect.height * 0.5;
+}
+
+function clampLauncherTop(value) {
+  const min = 44;
+  const max = Math.max(min, window.innerHeight - 44);
+  return Math.min(max, Math.max(min, Number(value) || min));
+}
+
+function restoreLauncherTop() {
+  chrome.storage.local.get([LAUNCHER_TOP_KEY], (result) => {
+    const saved = Number(result[LAUNCHER_TOP_KEY]);
+    if (!Number.isFinite(saved) || !launcherEl) return;
+
+    launcherTop = clampLauncherTop(saved);
+    launcherEl.style.top = `${Math.round(launcherTop)}px`;
+    launcherEl.style.transform = "none";
+  });
+}
+
+function saveLauncherTop() {
+  if (!Number.isFinite(launcherTop)) return;
+  chrome.storage.local.set({ [LAUNCHER_TOP_KEY]: Math.round(launcherTop) });
 }
 
 function isValidEmail(email) {

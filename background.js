@@ -50,6 +50,33 @@ const DEFAULT_STAGE_TEMPLATES = {
     }
   ]
 };
+
+const FALLBACK_LINKEDIN_SEQUENCE = {
+  id: "default-linkedin-outreach",
+  name: "Default LinkedIn Outreach",
+  description: "Human-in-the-loop LinkedIn DM sequence aligned to deal stage progression.",
+  recommended_start_stage: 1,
+  templates: [
+    {
+      id: "li-stage1-open",
+      stage: 1,
+      label: "Stage 1 Intro",
+      body: "Hi {{personFirstName}} - thanks for connecting. I work with teams like {{orgName}} on {{useCaseOrDeal}}. Open to a quick exchange this week?"
+    },
+    {
+      id: "li-stage2-value",
+      stage: 2,
+      label: "Stage 2 Value Follow-up",
+      body: "Hi {{personFirstName}}, following up with one practical idea for {{orgName}}: {{valueHook}}. If useful, I can share a concise 2-step plan."
+    },
+    {
+      id: "li-stage3-proof",
+      stage: 3,
+      label: "Stage 3 Proof + CTA",
+      body: "Hi {{personFirstName}}, we recently helped a similar team reduce time-to-outcome. If this is still relevant, would a 10-minute chat next week help?"
+    }
+  ]
+};
 let lastKnownPipedriveOrigin = "https://app.pipedrive.com";
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -1295,8 +1322,28 @@ async function handleLinkedInSearchPersons(payload) {
 async function handleLinkedInGetSequences() {
   const options = await getOptions();
   const backendBaseUrl = normalizeBackendBaseUrl(options.backendBaseUrl);
-  const data = await fetchBackendJson(`${backendBaseUrl}/sequences`);
-  return data;
+  try {
+    const data = await fetchBackendJson(`${backendBaseUrl}/sequences`);
+    if (Array.isArray(data?.sequences) && data.sequences.length) {
+      return data;
+    }
+  } catch (_error) {
+    // Fall through to built-in sequence fallback.
+  }
+
+  return {
+    ok: true,
+    version: 1,
+    updated_at: null,
+    sequences: [
+      {
+        id: FALLBACK_LINKEDIN_SEQUENCE.id,
+        name: FALLBACK_LINKEDIN_SEQUENCE.name,
+        description: FALLBACK_LINKEDIN_SEQUENCE.description,
+        recommended_start_stage: FALLBACK_LINKEDIN_SEQUENCE.recommended_start_stage
+      }
+    ]
+  };
 }
 
 async function handleLinkedInGetTemplates(payload) {
@@ -1313,8 +1360,25 @@ async function handleLinkedInGetTemplates(payload) {
     params.set("stage", String(stage));
   }
 
-  const data = await fetchBackendJson(`${backendBaseUrl}/templates?${params.toString()}`);
-  return data;
+  try {
+    const data = await fetchBackendJson(`${backendBaseUrl}/templates?${params.toString()}`);
+    if (Array.isArray(data?.templates) && data.templates.length) {
+      return data;
+    }
+  } catch (_error) {
+    // Fall through to built-in template fallback.
+  }
+
+  const fallbackTemplates = FALLBACK_LINKEDIN_SEQUENCE.templates
+    .filter((template) => !Number.isFinite(stage) || stage <= 0 || Number(template.stage) === stage)
+    .map((template) => ({ ...template }));
+
+  return {
+    ok: true,
+    sequence_id: sequenceId,
+    stage: Number.isFinite(stage) && stage > 0 ? stage : null,
+    templates: fallbackTemplates
+  };
 }
 
 async function handleLinkedInGetTalkingPoints(payload) {

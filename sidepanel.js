@@ -78,10 +78,14 @@ async function refreshAll() {
   state.sequences = sequencesResp.data.sequences || [];
   renderSequenceSelect();
 
-  if (!state.selectedSequenceId && state.sequences.length) {
-    const recommended = state.match?.sequenceId || state.sequences[0].id;
-    state.selectedSequenceId = recommended;
-    refs.sequenceSelect.value = recommended;
+  if (state.sequences.length) {
+    const recommended = String(state.match?.sequenceId || "").trim();
+    const current = String(state.selectedSequenceId || "").trim();
+    const hasCurrent = state.sequences.some((sequence) => sequence.id === current);
+    const hasRecommended = state.sequences.some((sequence) => sequence.id === recommended);
+    const resolved = hasCurrent ? current : hasRecommended ? recommended : state.sequences[0].id;
+    state.selectedSequenceId = resolved;
+    refs.sequenceSelect.value = resolved;
   }
 
   await loadTemplates();
