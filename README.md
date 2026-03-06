@@ -30,6 +30,8 @@ Peak Access is a Manifest V3 Chrome extension for sales-call and follow-up workf
   - `src/lib/pipedrive.js`
   - `src/lib/pipedrive.ts` (requested module path)
 - New backend:
+  - `backend/app.js`
+  - `backend/queue-store.js`
   - `backend/server.js`
   - `backend/package.json`
   - `backend/data/sequences.json`
@@ -133,6 +135,49 @@ Backend endpoints:
 Webhook auth:
 - Header `x-peak-access-secret` must match `WEBHOOK_SECRET` env var.
 
+## Deploy Backend To Render (Route 2)
+
+Use Render Web Service + Render PostgreSQL.
+
+### 1. Create Render PostgreSQL
+
+1. In Render dashboard, create a new PostgreSQL instance.
+2. Copy its internal `DATABASE_URL`.
+
+### 2. Create Render Web Service
+
+1. Create a new Web Service from this repo.
+2. Set root directory to `backend`.
+3. Runtime: Node.
+4. Build command: `npm install`.
+5. Start command: `npm run start`.
+
+### 3. Set Environment Variables (Render)
+
+Required:
+
+- `DATABASE_URL` (from Render Postgres)
+- `WEBHOOK_SECRET`
+
+Recommended:
+
+- `CALL_DISPOSITION_TRIGGER_OPTION_ID=6`
+- `CALL_DISPOSITION_TRIGGER_LABEL=LinkedIn Outreach next step`
+
+Optional Pipedrive write-back:
+
+- `PIPEDRIVE_BASE_URL`
+- `PIPEDRIVE_API_TOKEN`
+- `PERSON_DM_ELIGIBLE_FIELD_KEY`
+
+After deploy, set extension option `backendBaseUrl` to your Render URL (for example `https://peak-access-backend.onrender.com`).
+
+### 4. Verify
+
+- `GET /health` returns `{ ok: true }`
+- `GET /sequences` returns your sequence list
+- Trigger webhook and confirm `GET /eligible/:personId` shows `eligible: true`
+
 ## Pipedrive Automation Setup
 
 See: `PIPEDRIVE_AUTOMATION_SETUP.md`
@@ -152,4 +197,4 @@ See: `TEST_CHECKLIST.md`
 
 - LinkedIn DOM selectors can change over time; composer insertion is best-effort with clipboard fallback.
 - `src/lib/pipedrive.ts` is provided per requested path and mirrors runtime JS module exports.
-- Backend currently uses JSON-file storage for sequence/queue state; TODO migrate to database for multi-instance production.
+- Queue storage uses PostgreSQL when `DATABASE_URL` is set; without it, backend falls back to local JSON file for development only.
