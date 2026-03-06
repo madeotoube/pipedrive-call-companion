@@ -178,6 +178,36 @@ After deploy, set extension option `backendBaseUrl` to your Render URL (for exam
 - `GET /sequences` returns your sequence list
 - Trigger webhook and confirm `GET /eligible/:personId` shows `eligible: true`
 
+## Deploy Backend To Vercel (Basic Start)
+
+This backend also supports a basic Vercel deployment.
+
+### Vercel project settings
+
+1. Import repo in Vercel.
+2. Set project root directory to `backend`.
+3. Framework preset: `Other`.
+4. Build command: leave empty.
+5. Output directory: leave empty.
+
+### Required environment variables (Vercel)
+
+- `WEBHOOK_SECRET`
+
+Optional:
+
+- `CALL_DISPOSITION_TRIGGER_OPTION_ID` (defaults to `6`)
+- `CALL_DISPOSITION_TRIGGER_LABEL` (defaults to `LinkedIn Outreach next step`)
+- `PIPEDRIVE_BASE_URL`
+- `PIPEDRIVE_API_TOKEN`
+- `PERSON_DM_ELIGIBLE_FIELD_KEY`
+- `DATABASE_URL` (if you want durable eligibility storage)
+
+### Notes for basic mode
+
+- Endpoints remain the same (`/health`, `/sequences`, `/templates`, `/eligible/:personId`, `/pipedrive/webhook`).
+- Without `DATABASE_URL`, eligibility queue falls back to `/tmp` on Vercel (ephemeral, good for quick testing only).
+
 ## Pipedrive Automation Setup
 
 See: `PIPEDRIVE_AUTOMATION_SETUP.md`

@@ -1,0 +1,18 @@
+{
+  "version": 2,
+  "functions": {
+    "api/index.js": {
+      "runtime": "@vercel/node",
+      "includeFiles": "data/**"
+    }
+  },
+  "routes": [
+    { "src": "/health", "dest": "/api/index.js" },
+    { "src": "/sequences", "dest": "/api/index.js" },
+    { "src": "/sequences/(.*)", "dest": "/api/index.js" },
+    { "src": "/templates", "dest": "/api/index.js" },
+    { "src": "/eligible/(.*)", "dest": "/api/index.js" },
+    { "src": "/pipedrive/webhook", "dest": "/api/index.js" },
+    { "src": "/(.*)", "dest": "/api/index.js" }
+  ]
+}

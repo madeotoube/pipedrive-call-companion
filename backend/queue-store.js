@@ -7,7 +7,12 @@ export function createQueueStore({ baseDir = process.cwd() } = {}) {
   if (databaseUrl) {
     return new PostgresQueueStore(databaseUrl);
   }
-  return new FileQueueStore(path.join(baseDir, "data", "dm-eligible-queue.json"));
+
+  const queuePath = process.env.VERCEL
+    ? path.join("/tmp", "dm-eligible-queue.json")
+    : path.join(baseDir, "data", "dm-eligible-queue.json");
+
+  return new FileQueueStore(queuePath);
 }
 
 class PostgresQueueStore {
