@@ -1,191 +1,155 @@
-# Pipedrive Call Companion (Chrome Extension MV3)
+# Peak Access Chrome Extension (MV3)
 
-A Manifest V3 Chrome extension that injects a fast right-side panel on Pipedrive Deal/Person pages to support live-call workflows.
+Peak Access is a Manifest V3 Chrome extension for sales-call and follow-up workflows across Pipedrive and LinkedIn.
 
-## Features
+## Step 0: Repo Inventory (Before Upgrade)
 
-- Detects Pipedrive page context for:
-  - `/deal/{id}`, `/deals/{id}`
-  - `/person/{id}`, `/persons/{id}`
-- Pulls context from Pipedrive API using API token (MVP)
-- Deterministic pre-call brief (no LLM key needed)
-- Talking-point cards and risk flags
-- `No Answer` flow with 3 email options and Gmail draft creation
-- LinkedIn lookup button (direct profile if available, otherwise targeted lookup query; no scraping)
-- Paste-email flow to save missing person email to Pipedrive
-- Local quick notes for `Answered` calls
-- Customizable no-answer email templates by deal stage
-- Stage-aware talking points driven by deal stage, recent notes/activities, and detected custom-field signals
+### Existing extension shape
 
-## File Structure
+- `manifest.json`
+  - MV3 service worker background
+  - content script for `https://*.pipedrive.com/*`
+  - permissions: storage, identity, tabs
+  - Gmail compose OAuth scope configured
+- `background.js`
+  - Pipedrive context fetch for deals/persons
+  - deterministic pre-call brief generation
+  - Gmail draft creation via `chrome.identity.getAuthToken`
+- `content.js`
+  - Pipedrive URL detection (`/deal/{id}`, `/deals/{id}`, `/person/{id}`, `/persons/{id}`)
+  - injected right-side panel
+- `options.html` + `options.js`
+  - token + UI toggles + no-answer template JSON
 
-- `/manifest.json`
-- `/background.js`
-- `/content.js`
-- `/ui.css`
-- `/options.html`
-- `/options.js`
-- `/lib/email.js`
+### Smallest new/edited set added in this upgrade
 
-## Load Unpacked Extension
+- New extension files:
+  - `linkedin-content.js` (LinkedIn context + Shadow DOM widget + composer helpers)
+  - `sidepanel.html`, `sidepanel.css`, `sidepanel.js` (LinkedIn Mode UI)
+  - `src/config.js`
+  - `src/lib/pipedrive.js`
+  - `src/lib/pipedrive.ts` (requested module path)
+- New backend:
+  - `backend/server.js`
+  - `backend/package.json`
+  - `backend/data/sequences.json`
+  - `backend/data/dm-eligible-queue.json`
+  - `backend/.env.example`
+- New docs:
+  - `PIPEDRIVE_AUTOMATION_SETUP.md`
+  - `TEST_CHECKLIST.md`
+- Edited:
+  - `manifest.json`
+  - `background.js`
+  - `options.html`
+  - `options.js`
 
-1. Open Chrome and go to `chrome://extensions`.
-2. Enable **Developer mode**.
-3. Click **Load unpacked**.
-4. Select this folder: `pipedrive-extension`.
+## What This Upgrade Adds
 
-## Configure Pipedrive Token
+1. LinkedIn Outreach Sequencer (human-in-the-loop)
+- Trigger source: Pipedrive call activity disposition includes `LinkedIn Outreach next step`.
+- Rep flow:
+  - choose template
+  - insert/copy into LinkedIn composer
+  - edit manually
+  - send manually on LinkedIn
+  - click `Log & Advance` in extension
 
-1. Open extension options from `chrome://extensions` -> **Details** -> **Extension options**.
-2. Paste your Pipedrive API token.
+2. LinkedIn identity resolution against Pipedrive
+- Match order:
+  1. LinkedIn profile URL custom field (canonical)
+  2. Email fallback
+  3. Name fallback (top 5 + manual confirm)
+- Manual confirm writes LinkedIn profile URL back to Pipedrive person.
+
+3. Shared sequence/template backend
+- Extension fetches centrally managed templates/sequences from backend.
+- Backend webhook receives Pipedrive automation trigger and marks person DM-eligible in queue (and optionally writes to Pipedrive boolean field).
+
+4. LinkedIn-safe injection
+- LinkedIn page widget uses Shadow DOM to isolate CSS and reduce DOM/CSS collisions.
+
+## Manifest/Runtime Changes
+
+- Extension now runs on:
+  - `https://*.pipedrive.com/*`
+  - `https://*.linkedin.com/*`
+- Side Panel enabled (`side_panel.default_path`).
+- New permissions:
+  - `activeTab`, `sidePanel`, `scripting`.
+- Existing Gmail draft workflow retained.
+
+## Required Pipedrive Custom Fields
+
+### Person fields
+
+- `linkedin_profile_url` (text)
+- `linkedin_dm_sequence_id` (text)
+- `linkedin_dm_stage` (number)
+- `linkedin_dm_last_sent_at` (datetime)
+- `linkedin_dm_eligible` (boolean)
+
+### Activity field
+
+- `Call Disposition` (multi-select) with options:
+  1. Connected right person
+  2. Connected gatekeeper
+  3. No answer
+  4. No voicemail left
+  5. Voicemail left
+  6. LinkedIn Outreach next step
+
+Important:
+- Trigger should key off the **option ID** for option 6 when possible, not just label.
+
+## Extension Setup
+
+1. Load extension unpacked (`chrome://extensions`).
+2. Open extension options and configure:
+- Pipedrive API token
+- backend base URL (default `http://localhost:8787`)
+- person custom field keys
+- activity call disposition field key + trigger option ID
 3. Save options.
+4. Reload extension.
 
-You can also add stage-based email templates in options under **No Answer email templates by stage (JSON)**.
+## Backend Setup
 
-If token is missing or invalid, panel requests will fail with an actionable error message.
-
-## Gmail OAuth Setup (Draft Creation)
-
-This extension uses `chrome.identity.getAuthToken({ interactive: true })` and the Gmail scope:
-
-- `https://www.googleapis.com/auth/gmail.compose`
-
-### Required Google Cloud setup
-
-1. Create or select a Google Cloud project.
-2. Enable **Gmail API**.
-3. Configure **OAuth consent screen** (External or Internal as needed).
-4. Add test users if app is in testing mode.
-5. Create an OAuth client suitable for Chrome extension identity flow.
-6. Replace `oauth2.client_id` in `/manifest.json`:
-
-```json
-"oauth2": {
-  "client_id": "YOUR_CLIENT_ID.apps.googleusercontent.com",
-  "scopes": ["https://www.googleapis.com/auth/gmail.compose"]
-}
+```bash
+cd backend
+npm install
+cp .env.example .env
+npm run dev
 ```
 
-7. Reload the extension in `chrome://extensions`.
+Backend endpoints:
+- `GET /health`
+- `GET /sequences`
+- `GET /sequences/:id`
+- `GET /templates?sequence_id=<id>&stage=<n>`
+- `GET /eligible/:personId`
+- `POST /pipedrive/webhook`
 
-When you click **Create Gmail Draft**, Chrome prompts for consent (first run), then the extension creates a draft via:
+Webhook auth:
+- Header `x-peak-access-secret` must match `WEBHOOK_SECRET` env var.
 
-- `POST https://gmail.googleapis.com/gmail/v1/users/me/drafts`
+## Pipedrive Automation Setup
 
-The UI shows the created draft id.
+See: `PIPEDRIVE_AUTOMATION_SETUP.md`
 
-## Message Contract
+## Test Checklist
 
-### Content -> Background
+See: `TEST_CHECKLIST.md`
 
-- `GET_CONTEXT_AND_BRIEF` with `{ type: "deal"|"person", id: number }`
-- `CREATE_GMAIL_DRAFT` with `{ to, subject, body }`
-- `SAVE_EMAIL_TO_PIPEDRIVE_PERSON` with `{ personId, email }`
+## Security/Storage Notes
 
-### Background -> Content
+- No hardcoded secrets in source.
+- Extension stores user config in `chrome.storage.sync`.
+- Backend uses environment variables for webhook secret and optional Pipedrive write-back credentials.
+- LinkedIn message sending is intentionally manual (human-in-the-loop).
 
-- Success: `{ ok: true, data: ... }`
-- Error: `{ ok: false, error: "..." }`
+## Known Limitations
 
-## Deterministic Output Schema
-
-The brief generator returns this exact schema:
-
-```json
-{
-  "preCall": {
-    "oneLiner": "string",
-    "keyFacts": ["string", "string", "string"],
-    "riskFlags": ["string"]
-  },
-  "cards": [
-    { "title": "string", "bullets": ["string", "string"] }
-  ],
-  "noAnswer": {
-    "emailDrafts": [
-      { "label": "string", "subject": "string", "body": "string" }
-    ]
-  }
-}
-```
-
-## Notes on Compliance
-
-- No LinkedIn scraping is implemented.
-- LinkedIn button only opens a profile/search URL in a new tab.
-- Email enrichment is user-assisted (manual paste) for MVP.
-
-## Customize Email Drafts by Stage
-
-In extension options, set **No Answer email templates by stage (JSON)**.
-
-Example:
-
-```json
-{
-  "default": [
-    { "label": "Email #1", "subject": "Quick follow-up on {{dealTitle}}", "body": "Hi {{personFirstName}},\\n\\n..." },
-    { "label": "Email #2", "subject": "Idea for {{orgName}}", "body": "Hi {{personFirstName}},\\n\\n..." },
-    { "label": "Email #3", "subject": "Reschedule this week?", "body": "Hi {{personFirstName}},\\n\\n..." }
-  ],
-  "stage:3": [
-    { "label": "Email #1", "subject": "Decision check for {{dealTitle}}", "body": "Hi {{personFirstName}},\\n\\n..." },
-    { "label": "Email #2", "subject": "Blockers on {{dealTitle}}?", "body": "Hi {{personFirstName}},\\n\\n..." },
-    { "label": "Email #3", "subject": "Should we keep this active?", "body": "Hi {{personFirstName}},\\n\\n..." }
-  ]
-}
-```
-
-Supported tokens:
-
-- `{{personFirstName}}`
-- `{{personName}}`
-- `{{orgName}}`
-- `{{dealTitle}}`
-- `{{dealValue}}`
-- `{{dealStage}}`
-- `{{jobTitle}}`
-
-## Talking-Point Personalization Logic
-
-Talking cards are now generated from:
-
-- Deal stage bucket (early/mid/late)
-- Recent note/activity keyword signals (timeline, budget, legal/procurement, stall risk, competitor pressure)
-- Custom fields detected from `dealFields` and `personFields` definitions when labels indicate budget/timeline/competitor/stakeholder/use-case context
-- Account context such as number of open deals for the contact
-
-## Troubleshooting
-
-### 1) `Pipedrive API token missing`
-
-- Save token in options page and retry refresh in panel.
-
-### 2) Pipedrive 401 errors
-
-- Token is invalid/expired.
-- Confirm token from your Pipedrive account settings.
-
-### 3) Pipedrive 404 errors
-
-- The current deal/person id may no longer exist.
-- Confirm page URL and entity availability.
-
-### 4) Gmail OAuth errors / 401 / 403
-
-- Verify `oauth2.client_id` in manifest.
-- Ensure Gmail API enabled in your Google Cloud project.
-- Ensure OAuth consent screen is configured and user is allowed (test mode).
-- Reload extension after any manifest changes.
-
-### 5) Panel does not update on in-app navigation
-
-- Pipedrive is SPA-based. This extension includes URL polling for route changes.
-- If needed, refresh tab once after install.
-
-## Development Notes
-
-- Vanilla JS and minimal CSS only.
-- No external frameworks.
-- Background service worker is module-based.
-- Quick notes are stored in `chrome.storage.local` keyed by context (`deal:{id}` / `person:{id}`).
+- LinkedIn DOM selectors can change over time; composer insertion is best-effort with clipboard fallback.
+- `src/lib/pipedrive.ts` is provided per requested path and mirrors runtime JS module exports.
+- Backend currently uses JSON-file storage for sequence/queue state; TODO migrate to database for multi-instance production.
