@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Peak Access LinkedIn Mode</title>
+    <link rel="stylesheet" href="sidepanel.css" />
+  </head>
+  <body>
+    <main class="sp-root">
+      <header class="sp-header">
+        <h1>LinkedIn Mode</h1>
+        <button id="refreshBtn" class="sp-btn sp-btn-secondary" type="button">Refresh</button>
+      </header>
+
+      <section class="sp-section">
+        <h2>Detected LinkedIn Context</h2>
+        <div id="linkedinContext" class="sp-card"></div>
+      </section>
+
+      <section class="sp-section">
+        <h2>Pipedrive Match</h2>
+        <div id="matchCard" class="sp-card"></div>
+        <div id="matchCandidates" class="sp-stack"></div>
+      </section>
+
+      <section class="sp-section">
+        <h2>Sequence & Templates</h2>
+        <label class="sp-label" for="sequenceSelect">Sequence</label>
+        <select id="sequenceSelect" class="sp-input"></select>
+
+        <label class="sp-label" for="stageInput">Current Stage</label>
+        <input id="stageInput" class="sp-input" type="number" min="1" step="1" />
+
+        <div id="templatesList" class="sp-stack"></div>
+      </section>
+
+      <section class="sp-section">
+        <h2>Composer</h2>
+        <textarea id="draftText" class="sp-textarea" placeholder="Template text appears here"></textarea>
+        <div class="sp-actions">
+          <button id="insertBtn" class="sp-btn sp-btn-primary" type="button">Insert Template</button>
+          <button id="copyBtn" class="sp-btn sp-btn-secondary" type="button">Copy</button>
+          <button id="logAdvanceBtn" class="sp-btn sp-btn-primary" type="button">Log &amp; Advance</button>
+        </div>
+      </section>
+
+      <section class="sp-section">
+        <h2>Status</h2>
+        <div id="status" class="sp-card">Idle.</div>
+      </section>
+    </main>
+
+    <script src="sidepanel.js" type="module"></script>
+  </body>
+</html>

@@ -1,11 +1,17 @@
 import { base64UrlEncode, buildRfc2822Message } from "./lib/email.js";
+import { APP_CONFIG, DEFAULT_STORAGE } from "./src/config.js";
+import {
+  canonicalizeLinkedInUrl,
+  createLinkedInDmLog,
+  fetchPersonById,
+  searchPersonByEmail,
+  searchPersonByLinkedInUrl,
+  searchPersonByName,
+  updatePersonFields
+} from "./src/lib/pipedrive.js";
 
 const DEFAULT_OPTIONS = {
-  apiToken: "",
-  autoOpenPanel: true,
-  showNotes: true,
-  showActivities: true,
-  emailTemplatesByStage: ""
+  ...DEFAULT_STORAGE
 };
 
 const DEFAULT_STAGE_TEMPLATES = {
@@ -44,6 +50,7 @@ const DEFAULT_STAGE_TEMPLATES = {
     }
   ]
 };
+let lastKnownPipedriveOrigin = "https://app.pipedrive.com";
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   handleMessage(message, sender)
@@ -53,6 +60,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     });
 
   return true;
+});
+
+chrome.action.onClicked.addListener(async (tab) => {
+  if (!tab?.id) return;
+  await chrome.sidePanel.open({ tabId: tab.id });
 });
 
 async function handleMessage(message, sender) {
@@ -68,6 +80,52 @@ async function handleMessage(message, sender) {
 
   if (msgType === "SAVE_EMAIL_TO_PIPEDRIVE_PERSON") {
     return handleSaveEmail(message?.payload || {}, sender);
+  }
+
+  if (msgType === "OPEN_LINKEDIN_SIDE_PANEL") {
+    return handleOpenLinkedInSidePanel(sender);
+  }
+
+  if (msgType === "LINKEDIN_GET_CONTEXT") {
+    return handleLinkedInGetContext();
+  }
+
+  if (msgType === "LINKEDIN_MATCH_PERSON") {
+    return handleLinkedInMatchPerson(message?.payload || {});
+  }
+
+  if (msgType === "LINKEDIN_CONFIRM_MATCH") {
+    return handleLinkedInConfirmMatch(message?.payload || {});
+  }
+
+  if (msgType === "LINKEDIN_GET_SEQUENCES") {
+    return handleLinkedInGetSequences();
+  }
+
+  if (msgType === "LINKEDIN_GET_TEMPLATES") {
+    return handleLinkedInGetTemplates(message?.payload || {});
+  }
+
+  if (msgType === "LINKEDIN_INSERT_TEMPLATE") {
+    return forwardToActiveLinkedInTab({
+      type: "LINKEDIN_SET_COMPOSER_TEXT",
+      payload: { text: String(message?.payload?.text || "") }
+    });
+  }
+
+  if (msgType === "LINKEDIN_GET_COMPOSER_TEXT") {
+    return forwardToActiveLinkedInTab({ type: "LINKEDIN_GET_COMPOSER_TEXT" });
+  }
+
+  if (msgType === "LINKEDIN_COPY_TEXT") {
+    return forwardToActiveLinkedInTab({
+      type: "LINKEDIN_COPY_TEXT",
+      payload: { text: String(message?.payload?.text || "") }
+    });
+  }
+
+  if (msgType === "LINKEDIN_LOG_AND_ADVANCE") {
+    return handleLinkedInLogAndAdvance(message?.payload || {});
   }
 
   throw new Error("Unsupported message type.");
@@ -89,6 +147,7 @@ async function handleGetContextAndBrief(message, sender) {
   }
 
   const baseOrigin = getBaseOrigin(sender?.url || payload.baseOrigin);
+  lastKnownPipedriveOrigin = baseOrigin;
   let context;
 
   if (contextType === "deal") {
@@ -164,6 +223,7 @@ async function handleSaveEmail(payload, sender) {
   }
 
   const baseOrigin = getBaseOrigin(sender?.url || payload.baseOrigin);
+  lastKnownPipedriveOrigin = baseOrigin;
 
   const updated = await fetchPipedrive({
     path: `/api/v1/persons/${personId}`,
@@ -975,4 +1035,331 @@ function findLinkedInUrl(person) {
   if (!person || !Array.isArray(person.im)) return "";
   const profile = person.im.find((entry) => /linkedin\.com/i.test(String(entry?.value || "")));
   return profile?.value || "";
+}
+
+async function handleOpenLinkedInSidePanel(sender) {
+  const tabId = sender?.tab?.id;
+  if (!tabId) {
+    throw new Error("No tab context available to open side panel.");
+  }
+
+  await chrome.sidePanel.open({ tabId });
+  return { opened: true, tabId };
+}
+
+async function handleLinkedInGetContext() {
+  const tab = await getActiveTab();
+  if (!tab?.id) {
+    throw new Error("No active tab found.");
+  }
+
+  if (!isLinkedInUrl(tab.url)) {
+    throw new Error("Open a LinkedIn tab first to use LinkedIn Mode.");
+  }
+
+  const response = await sendTabMessage(tab.id, { type: "LINKEDIN_DETECT_CONTEXT" });
+  if (!response?.ok) {
+    throw new Error(response?.error || "Failed to detect LinkedIn context.");
+  }
+
+  return {
+    tabId: tab.id,
+    ...response.data
+  };
+}
+
+async function handleLinkedInMatchPerson(payload) {
+  const options = await getOptions();
+  assertLinkedInOptions(options);
+
+  const tab = await getActiveTab();
+  if (!tab?.id || !isLinkedInUrl(tab.url)) {
+    throw new Error("Switch to a LinkedIn tab and retry.");
+  }
+
+  const baseOrigin = getBaseOriginFromActiveTabOrFallback();
+  const profileUrl = canonicalizeLinkedInUrl(String(payload.profileUrl || ""));
+  const emailHint = String(payload.emailHint || "").trim();
+  const profileName = String(payload.profileName || "").trim();
+
+  let person = null;
+  let strategy = "none";
+
+  if (profileUrl && options.personLinkedinProfileUrlKey) {
+    person = await searchPersonByLinkedInUrl({
+      baseOrigin,
+      apiToken: options.apiToken,
+      linkedInUrl: profileUrl,
+      linkedInFieldKey: options.personLinkedinProfileUrlKey
+    });
+    if (person) strategy = "linkedin_profile_url";
+  }
+
+  if (!person && emailHint) {
+    person = await searchPersonByEmail({
+      baseOrigin,
+      apiToken: options.apiToken,
+      email: emailHint
+    });
+    if (person) strategy = "email";
+  }
+
+  let candidates = [];
+  if (!person && profileName) {
+    const results = await searchPersonByName({
+      baseOrigin,
+      apiToken: options.apiToken,
+      name: profileName
+    });
+    candidates = results.map(toMatchedPersonSummary);
+    strategy = candidates.length ? "name_candidates" : "none";
+  }
+
+  let dmEligible = false;
+  let currentStage = 1;
+  let sequenceId = "";
+  let enrichedPerson = null;
+
+  if (person) {
+    enrichedPerson = toMatchedPersonSummary(person);
+    dmEligible = readBooleanField(person[options.personLinkedinDmEligibleKey]);
+    currentStage = Number(person[options.personLinkedinDmStageKey]) || 1;
+    sequenceId = String(person[options.personLinkedinDmSequenceIdKey] || "");
+
+    const backendEligible = await fetchDmEligibilityFromBackend(options.backendBaseUrl, enrichedPerson.id);
+    if (backendEligible?.eligible === true) {
+      dmEligible = true;
+    }
+  }
+
+  return {
+    strategy,
+    person: enrichedPerson,
+    candidates,
+    dmEligible,
+    currentStage,
+    sequenceId
+  };
+}
+
+async function handleLinkedInConfirmMatch(payload) {
+  const personId = Number(payload.personId);
+  if (!Number.isFinite(personId) || personId <= 0) {
+    throw new Error("Invalid personId for match confirmation.");
+  }
+
+  const options = await getOptions();
+  assertLinkedInOptions(options);
+
+  const profileUrl = canonicalizeLinkedInUrl(String(payload.profileUrl || ""));
+  if (!profileUrl) {
+    throw new Error("LinkedIn profile URL is required to confirm match.");
+  }
+
+  const baseOrigin = getBaseOriginFromActiveTabOrFallback();
+  await updatePersonFields({
+    baseOrigin,
+    apiToken: options.apiToken,
+    personId,
+    fields: {
+      [options.personLinkedinProfileUrlKey]: profileUrl
+    }
+  });
+
+  const person = await fetchPersonById({
+    baseOrigin,
+    apiToken: options.apiToken,
+    personId
+  });
+
+  return {
+    strategy: "manual_confirm",
+    person: toMatchedPersonSummary(person),
+    candidates: [],
+    dmEligible: readBooleanField(person?.[options.personLinkedinDmEligibleKey]),
+    currentStage: Number(person?.[options.personLinkedinDmStageKey]) || 1,
+    sequenceId: String(person?.[options.personLinkedinDmSequenceIdKey] || "")
+  };
+}
+
+async function handleLinkedInGetSequences() {
+  const options = await getOptions();
+  const backendBaseUrl = normalizeBackendBaseUrl(options.backendBaseUrl);
+  const data = await fetchBackendJson(`${backendBaseUrl}/sequences`);
+  return data;
+}
+
+async function handleLinkedInGetTemplates(payload) {
+  const options = await getOptions();
+  const backendBaseUrl = normalizeBackendBaseUrl(options.backendBaseUrl);
+  const sequenceId = String(payload.sequenceId || "").trim();
+  if (!sequenceId) {
+    throw new Error("sequenceId is required.");
+  }
+
+  const stage = Number(payload.stage || 0);
+  const params = new URLSearchParams({ sequence_id: sequenceId });
+  if (Number.isFinite(stage) && stage > 0) {
+    params.set("stage", String(stage));
+  }
+
+  const data = await fetchBackendJson(`${backendBaseUrl}/templates?${params.toString()}`);
+  return data;
+}
+
+async function handleLinkedInLogAndAdvance(payload) {
+  const options = await getOptions();
+  assertLinkedInOptions(options);
+
+  const personId = Number(payload.personId);
+  const currentStage = Number(payload.currentStage || 1);
+  const nextStage = currentStage + 1;
+  const profileUrl = canonicalizeLinkedInUrl(String(payload.profileUrl || ""));
+  const sequenceId = String(payload.sequenceId || "");
+  const templateId = String(payload.templateId || "manual");
+  const dmText = String(payload.dmText || "").trim();
+
+  if (!Number.isFinite(personId) || personId <= 0) {
+    throw new Error("Valid personId is required.");
+  }
+
+  if (!dmText) {
+    throw new Error("No DM text to log.");
+  }
+
+  const baseOrigin = getBaseOriginFromActiveTabOrFallback();
+  const now = new Date().toISOString();
+
+  await createLinkedInDmLog({
+    baseOrigin,
+    apiToken: options.apiToken,
+    personId,
+    linkedInUrl: profileUrl,
+    stage: currentStage,
+    sequenceId,
+    templateId,
+    timestamp: now,
+    messageBody: dmText
+  });
+
+  await updatePersonFields({
+    baseOrigin,
+    apiToken: options.apiToken,
+    personId,
+    fields: {
+      [options.personLinkedinDmStageKey]: nextStage,
+      [options.personLinkedinDmSequenceIdKey]: sequenceId || null,
+      [options.personLinkedinDmLastSentAtKey]: now,
+      [options.personLinkedinDmEligibleKey]: false,
+      ...(profileUrl ? { [options.personLinkedinProfileUrlKey]: profileUrl } : {})
+    }
+  });
+
+  return {
+    ok: true,
+    nextStage,
+    dmEligible: false
+  };
+}
+
+async function fetchDmEligibilityFromBackend(backendBaseUrl, personId) {
+  if (!personId) return null;
+  const base = normalizeBackendBaseUrl(backendBaseUrl);
+
+  try {
+    return await fetchBackendJson(`${base}/eligible/${personId}`);
+  } catch (_error) {
+    return null;
+  }
+}
+
+async function forwardToActiveLinkedInTab(message) {
+  const tab = await getActiveTab();
+  if (!tab?.id || !isLinkedInUrl(tab.url)) {
+    throw new Error("Open a LinkedIn tab to run this action.");
+  }
+
+  const response = await sendTabMessage(tab.id, message);
+  if (!response?.ok) {
+    throw new Error(response?.error || "LinkedIn tab action failed.");
+  }
+
+  return response.data;
+}
+
+async function getActiveTab() {
+  const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  return tabs[0] || null;
+}
+
+function sendTabMessage(tabId, message) {
+  return new Promise((resolve) => {
+    chrome.tabs.sendMessage(tabId, message, (response) => {
+      if (chrome.runtime.lastError) {
+        resolve({ ok: false, error: chrome.runtime.lastError.message });
+        return;
+      }
+
+      resolve(response || { ok: false, error: "No response from tab." });
+    });
+  });
+}
+
+function isLinkedInUrl(rawUrl) {
+  return /https?:\\/\\/(?:www\\.)?linkedin\\.com/i.test(String(rawUrl || ""));
+}
+
+function readBooleanField(value) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value === 1;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    return normalized === "true" || normalized === "1" || normalized === "yes";
+  }
+
+  return false;
+}
+
+function normalizeBackendBaseUrl(raw) {
+  const fallback = APP_CONFIG.backendBaseUrl;
+  const value = String(raw || fallback).trim();
+  return value.endsWith("/") ? value.slice(0, -1) : value;
+}
+
+async function fetchBackendJson(url) {
+  const response = await fetch(url, { method: "GET" });
+  const data = await safeJson(response);
+
+  if (!response.ok || data?.ok === false) {
+    throw new Error(data?.error || `Backend request failed (${response.status})`);
+  }
+
+  return data;
+}
+
+function toMatchedPersonSummary(person) {
+  return {
+    id: Number(person?.id) || null,
+    name: person?.name || "Unknown",
+    orgName: person?.org_id?.name || person?.org_name || "",
+    email: extractPrimaryValue(person?.email),
+    linkedInUrl: person?.linkedin_profile_url || person?.im?.find((entry) => /linkedin\\.com/i.test(String(entry?.value || "")))?.value || "",
+    dealTitle: person?.open_deals_count ? `${person.open_deals_count} open deal(s)` : ""
+  };
+}
+
+function assertLinkedInOptions(options) {
+  if (!options?.apiToken) {
+    throw new Error("Pipedrive API token missing in extension options.");
+  }
+  if (!options?.personLinkedinProfileUrlKey) {
+    throw new Error("Set personLinkedinProfileUrlKey in extension options.");
+  }
+  if (!options?.personLinkedinDmStageKey || !options?.personLinkedinDmSequenceIdKey || !options?.personLinkedinDmLastSentAtKey || !options?.personLinkedinDmEligibleKey) {
+    throw new Error("Set LinkedIn DM custom field keys in extension options.");
+  }
+}
+
+function getBaseOriginFromActiveTabOrFallback() {
+  return lastKnownPipedriveOrigin;
 }

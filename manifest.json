@@ -1,12 +1,15 @@
 {
   "manifest_version": 3,
   "name": "Pipedrive Call Companion",
-  "description": "Live-call productivity panel for Pipedrive with deterministic briefs and Gmail draft follow-ups.",
-  "version": "0.1.0",
-  "permissions": ["storage", "identity", "tabs"],
+  "description": "Peak Access call companion with Pipedrive context, Gmail draft support, and LinkedIn outreach sequencing.",
+  "version": "0.2.0",
+  "permissions": ["storage", "identity", "tabs", "activeTab", "sidePanel", "scripting"],
   "host_permissions": [
     "https://*.pipedrive.com/*",
-    "https://gmail.googleapis.com/*"
+    "https://gmail.googleapis.com/*",
+    "https://www.linkedin.com/*",
+    "https://*.linkedin.com/*",
+    "http://localhost:8787/*"
   ],
   "background": {
     "service_worker": "background.js",
@@ -18,8 +21,19 @@
       "js": ["content.js"],
       "css": ["ui.css"],
       "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://*.linkedin.com/*"],
+      "js": ["linkedin-content.js"],
+      "run_at": "document_idle"
     }
   ],
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "action": {
+    "default_title": "Peak Access"
+  },
   "options_page": "options.html",
   "oauth2": {
     "client_id": "374165809311-h5lbpnh7vshfg4e2elq4lb4ljv710g38.apps.googleusercontent.com",
