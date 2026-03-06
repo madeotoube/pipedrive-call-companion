@@ -120,8 +120,22 @@ export function createApp({ baseDir = process.cwd() } = {}) {
 }
 
 function isWebhookAuthorized(req, webhookSecret) {
-  const provided = String(req.header("x-peak-access-secret") || "").trim();
-  return Boolean(provided) && provided === webhookSecret;
+  const headerSecret = String(req.header("x-peak-access-secret") || "").trim();
+  if (headerSecret && headerSecret === webhookSecret) {
+    return true;
+  }
+
+  const querySecret = String(req.query?.secret || "").trim();
+  if (querySecret && querySecret === webhookSecret) {
+    return true;
+  }
+
+  const basic = parseBasicAuth(req.header("authorization"));
+  if (basic.password && basic.password === webhookSecret) {
+    return true;
+  }
+
+  return false;
 }
 
 function readJson(filePath, fallback) {
@@ -184,6 +198,29 @@ function flattenValues(value) {
   }
 
   return [value];
+}
+
+function parseBasicAuth(headerValue) {
+  const value = String(headerValue || "").trim();
+  if (!value.toLowerCase().startsWith("basic ")) {
+    return { username: "", password: "" };
+  }
+
+  try {
+    const encoded = value.slice(6).trim();
+    const decoded = Buffer.from(encoded, "base64").toString("utf8");
+    const separatorIndex = decoded.indexOf(":");
+    if (separatorIndex < 0) {
+      return { username: decoded, password: "" };
+    }
+
+    return {
+      username: decoded.slice(0, separatorIndex),
+      password: decoded.slice(separatorIndex + 1)
+    };
+  } catch (_error) {
+    return { username: "", password: "" };
+  }
 }
 
 function summarizePayload(payload) {
