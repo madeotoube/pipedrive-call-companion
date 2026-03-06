@@ -1,0 +1,250 @@
+#call-companion-root {
+  position: fixed;
+  top: 84px;
+  right: 0;
+  z-index: 2147483000;
+  pointer-events: none;
+}
+
+#call-companion-root * {
+  box-sizing: border-box;
+}
+
+.cc-panel {
+  width: 360px;
+  max-height: calc(100vh - 96px);
+  margin-right: 14px;
+  background: linear-gradient(180deg, #f7faf9 0%, #eef3f1 100%);
+  color: #16211d;
+  border: 1px solid #bccbc6;
+  border-radius: 14px;
+  box-shadow: 0 10px 30px rgba(27, 39, 34, 0.15);
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transition: transform 160ms ease, opacity 160ms ease;
+  font-family: "Avenir Next", "Segoe UI Variable", "Nunito Sans", sans-serif;
+}
+
+.cc-panel-hidden {
+  transform: translateX(110%);
+  opacity: 0;
+}
+
+.cc-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  border-bottom: 1px solid #d2dfda;
+  background: rgba(255, 255, 255, 0.75);
+}
+
+.cc-title {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.2;
+  letter-spacing: 0.2px;
+}
+
+.cc-header-controls {
+  display: flex;
+  gap: 6px;
+}
+
+.cc-body {
+  overflow: auto;
+  padding: 10px 12px 16px;
+}
+
+.cc-section {
+  padding-bottom: 10px;
+  margin-bottom: 10px;
+  border-bottom: 1px dashed #cad6d2;
+}
+
+.cc-section:last-child {
+  border-bottom: 0;
+  margin-bottom: 0;
+}
+
+.cc-section-title {
+  margin: 0 0 8px;
+  font-size: 12px;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  color: #2d4540;
+}
+
+.cc-subtitle {
+  margin: 8px 0 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #2d4540;
+}
+
+.cc-one-liner {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.cc-list {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.cc-card {
+  border: 1px solid #cfdbd8;
+  background: rgba(255, 255, 255, 0.85);
+  border-radius: 10px;
+  padding: 8px;
+  margin-bottom: 8px;
+}
+
+.cc-card-title {
+  margin: 0 0 6px;
+  font-size: 12px;
+}
+
+.cc-actions-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.cc-actions-row .cc-btn:last-child {
+  grid-column: span 2;
+}
+
+.cc-btn {
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 7px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.cc-btn-primary {
+  background: #1f6f57;
+  color: #ffffff;
+}
+
+.cc-btn-primary:hover {
+  background: #185946;
+}
+
+.cc-btn-secondary {
+  background: #f3f7f5;
+  border-color: #bfd0cb;
+  color: #26413a;
+}
+
+.cc-btn-secondary:hover {
+  background: #e8efec;
+}
+
+.cc-notes {
+  width: 100%;
+  min-height: 90px;
+  resize: vertical;
+  border-radius: 8px;
+  border: 1px solid #c2d2cd;
+  background: #ffffff;
+  padding: 8px;
+  font-size: 12px;
+  color: #1f2c28;
+  font-family: "IBM Plex Sans", "Avenir Next", sans-serif;
+}
+
+.cc-email-label {
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.cc-email-subject {
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+
+.cc-email-preview {
+  margin: 0 0 8px;
+  white-space: pre-wrap;
+  background: #fbfdfc;
+  border: 1px solid #d7e3df;
+  border-radius: 8px;
+  padding: 8px;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.cc-input {
+  width: 100%;
+  border: 1px solid #c2d2cd;
+  border-radius: 8px;
+  padding: 8px;
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
+.cc-helper {
+  margin: 0 0 8px;
+  font-size: 12px;
+}
+
+.cc-info {
+  font-size: 12px;
+  line-height: 1.35;
+  background: rgba(255, 255, 255, 0.8);
+  border: 1px solid #d1dfdb;
+  padding: 8px;
+  border-radius: 8px;
+}
+
+.cc-small-text {
+  margin-top: 6px;
+  font-size: 11px;
+  color: #3a5650;
+}
+
+.cc-note-content {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.35;
+  white-space: pre-wrap;
+}
+
+.cc-error-text {
+  color: #8b2424;
+}
+
+.cc-success-text {
+  color: #155c28;
+}
+
+.cc-launcher {
+  pointer-events: auto;
+  border: 1px solid #174a3a;
+  border-right: 0;
+  border-top-left-radius: 10px;
+  border-bottom-left-radius: 10px;
+  background: #1f6f57;
+  color: #fff;
+  padding: 10px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  cursor: pointer;
+  box-shadow: 0 8px 18px rgba(22, 44, 37, 0.2);
+}
+
+.cc-launcher-hidden {
+  display: none;
+}

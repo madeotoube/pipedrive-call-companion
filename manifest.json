@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "Pipedrive Call Companion",
+  "description": "Live-call productivity panel for Pipedrive with deterministic briefs and Gmail draft follow-ups.",
+  "version": "0.1.0",
+  "permissions": ["storage", "identity", "tabs"],
+  "host_permissions": [
+    "https://*.pipedrive.com/*",
+    "https://gmail.googleapis.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://*.pipedrive.com/*"],
+      "js": ["content.js"],
+      "css": ["ui.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "options_page": "options.html",
+  "oauth2": {
+    "client_id": "374165809311-h5lbpnh7vshfg4e2elq4lb4ljv710g38.apps.googleusercontent.com",
+    "scopes": ["https://www.googleapis.com/auth/gmail.compose"]
+  }
+}
