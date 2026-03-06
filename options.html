@@ -114,6 +114,40 @@
       </div>
 
       <div class="field">
+        <label for="backendBaseUrl">Shared backend base URL</label>
+        <input id="backendBaseUrl" type="text" autocomplete="off" placeholder="http://localhost:8787" />
+      </div>
+
+      <div class="field">
+        <label for="personLinkedinProfileUrlKey">Person custom field key: LinkedIn Profile URL</label>
+        <input id="personLinkedinProfileUrlKey" type="text" autocomplete="off" placeholder="e.g. 8af8f7... (Pipedrive field key)" />
+      </div>
+      <div class="field">
+        <label for="personLinkedinDmSequenceIdKey">Person custom field key: LinkedIn DM Sequence ID</label>
+        <input id="personLinkedinDmSequenceIdKey" type="text" autocomplete="off" placeholder="e.g. 4dd0c1..." />
+      </div>
+      <div class="field">
+        <label for="personLinkedinDmStageKey">Person custom field key: LinkedIn DM Stage</label>
+        <input id="personLinkedinDmStageKey" type="text" autocomplete="off" placeholder="e.g. 5f71aa..." />
+      </div>
+      <div class="field">
+        <label for="personLinkedinDmLastSentAtKey">Person custom field key: LinkedIn DM Last Sent At</label>
+        <input id="personLinkedinDmLastSentAtKey" type="text" autocomplete="off" placeholder="e.g. 9d11cc..." />
+      </div>
+      <div class="field">
+        <label for="personLinkedinDmEligibleKey">Person custom field key: LinkedIn DM Eligible</label>
+        <input id="personLinkedinDmEligibleKey" type="text" autocomplete="off" placeholder="e.g. aa77ee..." />
+      </div>
+      <div class="field">
+        <label for="callDispositionFieldKey">Activity custom field key: Call Disposition (multi-select)</label>
+        <input id="callDispositionFieldKey" type="text" autocomplete="off" placeholder="e.g. f31c5d..." />
+      </div>
+      <div class="field">
+        <label for="callDispositionTriggerOptionId">Trigger option ID for “LinkedIn Outreach next step”</label>
+        <input id="callDispositionTriggerOptionId" type="text" autocomplete="off" placeholder="Use the option ID, not label" />
+      </div>
+
+      <div class="field">
         <label for="emailTemplatesByStage">No Answer email templates by stage (JSON)</label>
         <textarea
           id="emailTemplatesByStage"

@@ -3,11 +3,28 @@ const DEFAULTS = {
   autoOpenPanel: true,
   showNotes: true,
   showActivities: true,
-  emailTemplatesByStage: ""
+  emailTemplatesByStage: "",
+  backendBaseUrl: "http://localhost:8787",
+  personLinkedinProfileUrlKey: "person.linkedin_profile_url",
+  personLinkedinDmSequenceIdKey: "person.linkedin_dm_sequence_id",
+  personLinkedinDmStageKey: "person.linkedin_dm_stage",
+  personLinkedinDmLastSentAtKey: "person.linkedin_dm_last_sent_at",
+  personLinkedinDmEligibleKey: "person.linkedin_dm_eligible",
+  callDispositionFieldKey: "activity.call_disposition",
+  callDispositionTriggerOptionId: "6",
+  callDispositionTriggerOptionLabel: "LinkedIn Outreach next step"
 };
 
 const refs = {
   apiToken: document.getElementById("apiToken"),
+  backendBaseUrl: document.getElementById("backendBaseUrl"),
+  personLinkedinProfileUrlKey: document.getElementById("personLinkedinProfileUrlKey"),
+  personLinkedinDmSequenceIdKey: document.getElementById("personLinkedinDmSequenceIdKey"),
+  personLinkedinDmStageKey: document.getElementById("personLinkedinDmStageKey"),
+  personLinkedinDmLastSentAtKey: document.getElementById("personLinkedinDmLastSentAtKey"),
+  personLinkedinDmEligibleKey: document.getElementById("personLinkedinDmEligibleKey"),
+  callDispositionFieldKey: document.getElementById("callDispositionFieldKey"),
+  callDispositionTriggerOptionId: document.getElementById("callDispositionTriggerOptionId"),
   emailTemplatesByStage: document.getElementById("emailTemplatesByStage"),
   autoOpenPanel: document.getElementById("autoOpenPanel"),
   showNotes: document.getElementById("showNotes"),
@@ -29,6 +46,14 @@ function init() {
 function restore() {
   chrome.storage.sync.get(DEFAULTS, (result) => {
     refs.apiToken.value = result.apiToken || "";
+    refs.backendBaseUrl.value = result.backendBaseUrl || "";
+    refs.personLinkedinProfileUrlKey.value = result.personLinkedinProfileUrlKey || "";
+    refs.personLinkedinDmSequenceIdKey.value = result.personLinkedinDmSequenceIdKey || "";
+    refs.personLinkedinDmStageKey.value = result.personLinkedinDmStageKey || "";
+    refs.personLinkedinDmLastSentAtKey.value = result.personLinkedinDmLastSentAtKey || "";
+    refs.personLinkedinDmEligibleKey.value = result.personLinkedinDmEligibleKey || "";
+    refs.callDispositionFieldKey.value = result.callDispositionFieldKey || "";
+    refs.callDispositionTriggerOptionId.value = result.callDispositionTriggerOptionId || "";
     refs.emailTemplatesByStage.value = result.emailTemplatesByStage || "";
     refs.autoOpenPanel.checked = Boolean(result.autoOpenPanel);
     refs.showNotes.checked = Boolean(result.showNotes);
@@ -38,6 +63,14 @@ function restore() {
 
 function save() {
   const apiToken = String(refs.apiToken.value || "").trim();
+  const backendBaseUrl = String(refs.backendBaseUrl.value || "").trim();
+  const personLinkedinProfileUrlKey = String(refs.personLinkedinProfileUrlKey.value || "").trim();
+  const personLinkedinDmSequenceIdKey = String(refs.personLinkedinDmSequenceIdKey.value || "").trim();
+  const personLinkedinDmStageKey = String(refs.personLinkedinDmStageKey.value || "").trim();
+  const personLinkedinDmLastSentAtKey = String(refs.personLinkedinDmLastSentAtKey.value || "").trim();
+  const personLinkedinDmEligibleKey = String(refs.personLinkedinDmEligibleKey.value || "").trim();
+  const callDispositionFieldKey = String(refs.callDispositionFieldKey.value || "").trim();
+  const callDispositionTriggerOptionId = String(refs.callDispositionTriggerOptionId.value || "").trim();
   const emailTemplatesByStage = String(refs.emailTemplatesByStage.value || "").trim();
 
   if (emailTemplatesByStage) {
@@ -52,6 +85,14 @@ function save() {
   chrome.storage.sync.set(
     {
       apiToken,
+      backendBaseUrl,
+      personLinkedinProfileUrlKey,
+      personLinkedinDmSequenceIdKey,
+      personLinkedinDmStageKey,
+      personLinkedinDmLastSentAtKey,
+      personLinkedinDmEligibleKey,
+      callDispositionFieldKey,
+      callDispositionTriggerOptionId,
       emailTemplatesByStage,
       autoOpenPanel: refs.autoOpenPanel.checked,
       showNotes: refs.showNotes.checked,
