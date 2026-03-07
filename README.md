@@ -1,121 +1,83 @@
-# Peak Access Chrome Extension (MV3)
+# Peak Access Call Companion (Chrome Extension MV3)
 
-Peak Access is a Manifest V3 Chrome extension for sales-call and follow-up workflows across Pipedrive and LinkedIn.
+Peak Access is an internal Chrome extension for sales workflows in **Pipedrive** and **LinkedIn**.
 
-## Step 0: Repo Inventory (Before Upgrade)
+It provides:
+- Pipedrive deal/person context panel with pre-call brief and talking points
+- No-answer follow-up email drafts + Gmail draft creation
+- LinkedIn outreach mode with sequence templates
+- Human-in-the-loop logging back to Pipedrive (`Log & Advance`)
 
-### Existing extension shape
+## Features
 
-- `manifest.json`
-  - MV3 service worker background
-  - content script for `https://*.pipedrive.com/*`
-  - permissions: storage, identity, tabs
-  - Gmail compose OAuth scope configured
-- `background.js`
-  - Pipedrive context fetch for deals/persons
-  - deterministic pre-call brief generation
-  - Gmail draft creation via `chrome.identity.getAuthToken`
-- `content.js`
-  - Pipedrive URL detection (`/deal/{id}`, `/deals/{id}`, `/person/{id}`, `/persons/{id}`)
-  - injected right-side panel
-- `options.html` + `options.js`
-  - token + UI toggles + no-answer template JSON
+### Pipedrive panel
+- Detects context on:
+  - `/deal/{id}` / `/deals/{id}`
+  - `/person/{id}` / `/persons/{id}`
+- Fetches context from Pipedrive API
+- Builds deterministic pre-call summary + talking points
+- No-answer flow with 3 draft options
+- Creates Gmail drafts (does not send)
+- Paste-and-save missing email to Pipedrive person
 
-### Smallest new/edited set added in this upgrade
-
-- New extension files:
-  - `linkedin-content.js` (LinkedIn context + Shadow DOM widget + composer helpers)
-  - `sidepanel.html`, `sidepanel.css`, `sidepanel.js` (LinkedIn Mode UI)
-  - `src/config.js`
-  - `src/lib/pipedrive.js`
-  - `src/lib/pipedrive.ts` (requested module path)
-- New backend:
-  - `backend/app.js`
-  - `backend/queue-store.js`
-  - `backend/server.js`
-  - `backend/package.json`
-  - `backend/data/sequences.json`
-  - `backend/data/dm-eligible-queue.json`
-  - `backend/.env.example`
-- New docs:
-  - `PIPEDRIVE_AUTOMATION_SETUP.md`
-  - `TEST_CHECKLIST.md`
-- Edited:
-  - `manifest.json`
-  - `background.js`
-  - `options.html`
-  - `options.js`
-
-## What This Upgrade Adds
-
-1. LinkedIn Outreach Sequencer (human-in-the-loop)
-- Trigger source: Pipedrive call activity disposition includes `LinkedIn Outreach next step`.
-- Rep flow:
-  - choose template
-  - insert/copy into LinkedIn composer
-  - edit manually
-  - send manually on LinkedIn
-  - click `Log & Advance` in extension
-
-2. LinkedIn identity resolution against Pipedrive
-- Match order:
-  1. LinkedIn profile URL custom field (canonical)
+### LinkedIn mode
+- Sidebar launcher with slide-in right pane
+- Match strategy:
+  1. LinkedIn URL custom field
   2. Email fallback
-  3. Name fallback (top 5 + manual confirm)
-- Manual confirm writes LinkedIn profile URL back to Pipedrive person.
+  3. Name search + manual confirm
+- Loads outreach sequences/templates from backend
+- Insert/copy template into LinkedIn composer
+- `Log & Advance` writes note/log + advances stage fields
 
-3. Shared sequence/template backend
-- Extension fetches centrally managed templates/sequences from backend.
-- Backend webhook receives Pipedrive automation trigger and marks person DM-eligible in queue (and optionally writes to Pipedrive boolean field).
+## Repository structure
 
-4. LinkedIn-safe injection
-- LinkedIn page widget uses Shadow DOM to isolate CSS and reduce DOM/CSS collisions.
+- `manifest.json` - extension manifest (MV3)
+- `background.js` - service worker + API/message orchestration
+- `content.js` - Pipedrive content script/panel
+- `linkedin-content.js` - LinkedIn content script/fallback panel
+- `sidepanel.html|css|js` - LinkedIn side panel UI
+- `options.html|js` - extension settings UI
+- `ui.css` - Pipedrive panel styles
+- `backend/` - shared sequences + webhook backend
+- `scripts/pack-extension.sh` - internal CRX packaging script
 
-## Manifest/Runtime Changes
+## Prerequisites
 
-- Extension now runs on:
-  - `https://*.pipedrive.com/*`
-  - `https://*.linkedin.com/*`
-- Side Panel enabled (`side_panel.default_path`).
-- New permissions:
-  - `activeTab`, `sidePanel`, `scripting`.
-- Existing Gmail draft workflow retained.
-
-## Required Pipedrive Custom Fields
-
-### Person fields
-
-- `linkedin_profile_url` (text)
-- `linkedin_dm_sequence_id` (text)
-- `linkedin_dm_stage` (number)
-- `linkedin_dm_last_sent_at` (datetime)
-- `linkedin_dm_eligible` (boolean)
-
-### Activity field
-
-- `Call Disposition` (multi-select) with options:
-  1. Connected right person
-  2. Connected gatekeeper
-  3. No answer
-  4. No voicemail left
-  5. Voicemail left
-  6. LinkedIn Outreach next step
-
-Important:
-- Trigger should key off the **option ID** for option 6 when possible, not just label.
-
-## Extension Setup
-
-1. Load extension unpacked (`chrome://extensions`).
-2. Open extension options and configure:
+- Google Chrome (current)
 - Pipedrive API token
-- backend base URL (default `http://localhost:8787`)
-- person custom field keys
-- activity call disposition field key + trigger option ID
-3. Save options.
-4. Reload extension.
+- (Optional) Gmail OAuth client configured for extension draft creation
+- Backend deployed (Vercel or Render)
 
-## Backend Setup
+## 1) Load extension (dev/unpacked)
+
+1. Open `chrome://extensions`
+2. Enable **Developer mode**
+3. Click **Load unpacked**
+4. Select repo folder:
+   - `/Users/larrytoube/Developer/PeakAccess/pipedrive-extension`
+
+## 2) Configure extension options
+
+Open extension options from `chrome://extensions` -> extension -> **Extension options**.
+
+Set at minimum:
+- `Pipedrive API token`
+- `Shared backend base URL` (example: `https://backend-gray-theta-93.vercel.app`)
+- Person custom field keys:
+  - `personLinkedinProfileUrlKey`
+  - `personLinkedinDmSequenceIdKey`
+  - `personLinkedinDmStageKey`
+  - `personLinkedinDmLastSentAtKey`
+  - `personLinkedinDmEligibleKey`
+
+Optional:
+- `Call disposition field key` and trigger option id
+- No-answer email template JSON overrides
+
+Save, then reload extension.
+
+## 3) Backend setup (local)
 
 ```bash
 cd backend
@@ -124,7 +86,28 @@ cp .env.example .env
 npm run dev
 ```
 
-Backend endpoints:
+Health check:
+- `http://localhost:8787/health`
+
+## 4) Deploy backend to Vercel (basic)
+
+1. Import repo into Vercel
+2. Set **Root Directory** to `backend`
+3. Framework preset: `Other`
+4. Build command: leave empty
+5. Output directory: leave empty
+
+Set environment variables:
+- `WEBHOOK_SECRET` (required)
+- `DATABASE_URL` (optional but recommended for durable queue)
+- `PIPEDRIVE_BASE_URL` (optional)
+- `PIPEDRIVE_API_TOKEN` (optional)
+- `PERSON_DM_ELIGIBLE_FIELD_KEY` (optional)
+- `CALL_DISPOSITION_TRIGGER_OPTION_ID` (optional, default `6`)
+- `CALL_DISPOSITION_TRIGGER_LABEL` (optional)
+
+### Vercel endpoints
+
 - `GET /health`
 - `GET /sequences`
 - `GET /sequences/:id`
@@ -132,99 +115,90 @@ Backend endpoints:
 - `GET /eligible/:personId`
 - `POST /pipedrive/webhook`
 
-Webhook auth:
-- Header `x-peak-access-secret` must match `WEBHOOK_SECRET` env var.
+## 5) Pipedrive webhook setup
 
-## Deploy Backend To Render (Route 2)
+If your Pipedrive webhook UI cannot send custom headers, use query secret auth:
 
-Use Render Web Service + Render PostgreSQL.
+`https://<your-backend>/pipedrive/webhook?secret=<WEBHOOK_SECRET>`
 
-### 1. Create Render PostgreSQL
+Recommended trigger:
+- Object: `activity`
+- Action: `change`
+- Condition: call completed/updated according to your process
 
-1. In Render dashboard, create a new PostgreSQL instance.
-2. Copy its internal `DATABASE_URL`.
+Minimal webhook body (works):
+```json
+{
+  "person_id": "<activity contact person id>"
+}
+```
 
-### 2. Create Render Web Service
+## 6) Gmail draft setup (optional)
 
-1. Create a new Web Service from this repo.
-2. Set root directory to `backend`.
-3. Runtime: Node.
-4. Build command: `npm install`.
-5. Start command: `npm run start`.
+OAuth scope required in manifest:
+- `https://www.googleapis.com/auth/gmail.compose`
 
-### 3. Set Environment Variables (Render)
+Create Google OAuth client for Chrome extension and set your extension ID.
 
-Required:
+## 7) Internal packaging (.crx)
 
-- `DATABASE_URL` (from Render Postgres)
-- `WEBHOOK_SECRET`
+Run:
 
-Recommended:
+```bash
+./scripts/pack-extension.sh
+```
 
-- `CALL_DISPOSITION_TRIGGER_OPTION_ID=6`
-- `CALL_DISPOSITION_TRIGGER_LABEL=LinkedIn Outreach next step`
+Outputs:
+- `dist/pipedrive-extension.crx`
+- `dist/pipedrive-extension.pem`
 
-Optional Pipedrive write-back:
+Important:
+- Keep `.pem` private and backed up
+- Reuse same `.pem` for all future updates
 
-- `PIPEDRIVE_BASE_URL`
-- `PIPEDRIVE_API_TOKEN`
-- `PERSON_DM_ELIGIBLE_FIELD_KEY`
+## 8) Test checklist (quick)
 
-After deploy, set extension option `backendBaseUrl` to your Render URL (for example `https://peak-access-backend.onrender.com`).
+1. Open Pipedrive deal/person page -> panel appears
+2. Click refresh -> context + brief render
+3. No-answer -> create Gmail draft
+4. Open LinkedIn profile -> LinkedIn pane loads
+5. Verify sequence/template appears
+6. Insert/copy template
+7. Send manually on LinkedIn
+8. Click `Log & Advance`
+9. Confirm Pipedrive person fields/stage update
+10. Validate eligibility endpoint:
+    - `/eligible/<personId>` returns `eligible: true`
 
-### 4. Verify
+## Troubleshooting
 
-- `GET /health` returns `{ ok: true }`
-- `GET /sequences` returns your sequence list
-- Trigger webhook and confirm `GET /eligible/:personId` shows `eligible: true`
+### Service worker shows "Inactive"
+Normal for MV3. Service workers sleep when idle and wake on events/messages.
 
-## Deploy Backend To Vercel (Basic Start)
+### LinkedIn template list empty
+- Verify backend URL in extension options
+- Check backend `/sequences` directly
+- Reload extension after changes
 
-This backend also supports a basic Vercel deployment.
+### Insert template does nothing
+- Open LinkedIn message composer first
+- Use `Copy` fallback and paste manually
 
-### Vercel project settings
+### Pipedrive webhook 401
+- Wrong/missing `WEBHOOK_SECRET`
+- If using query auth, confirm `?secret=...` matches env var exactly
 
-1. Import repo in Vercel.
-2. Set project root directory to `backend`.
-3. Framework preset: `Other`.
-4. Build command: leave empty.
-5. Output directory: leave empty.
+### No person match in LinkedIn mode
+- Confirm person field key for LinkedIn URL is correct
+- Use search + `Confirm Match + Save URL`
 
-### Required environment variables (Vercel)
+## Security notes
 
-- `WEBHOOK_SECRET`
+- Do not hardcode secrets in source
+- Keep API tokens and OAuth credentials in env/options only
+- Keep `.pem` private
+- LinkedIn sending stays manual (human-in-the-loop)
 
-Optional:
+## License / Usage
 
-- `CALL_DISPOSITION_TRIGGER_OPTION_ID` (defaults to `6`)
-- `CALL_DISPOSITION_TRIGGER_LABEL` (defaults to `LinkedIn Outreach next step`)
-- `PIPEDRIVE_BASE_URL`
-- `PIPEDRIVE_API_TOKEN`
-- `PERSON_DM_ELIGIBLE_FIELD_KEY`
-- `DATABASE_URL` (if you want durable eligibility storage)
-
-### Notes for basic mode
-
-- Endpoints remain the same (`/health`, `/sequences`, `/templates`, `/eligible/:personId`, `/pipedrive/webhook`).
-- Without `DATABASE_URL`, eligibility queue falls back to `/tmp` on Vercel (ephemeral, good for quick testing only).
-
-## Pipedrive Automation Setup
-
-See: `PIPEDRIVE_AUTOMATION_SETUP.md`
-
-## Test Checklist
-
-See: `TEST_CHECKLIST.md`
-
-## Security/Storage Notes
-
-- No hardcoded secrets in source.
-- Extension stores user config in `chrome.storage.sync`.
-- Backend uses environment variables for webhook secret and optional Pipedrive write-back credentials.
-- LinkedIn message sending is intentionally manual (human-in-the-loop).
-
-## Known Limitations
-
-- LinkedIn DOM selectors can change over time; composer insertion is best-effort with clipboard fallback.
-- `src/lib/pipedrive.ts` is provided per requested path and mirrors runtime JS module exports.
-- Queue storage uses PostgreSQL when `DATABASE_URL` is set; without it, backend falls back to local JSON file for development only.
+Internal tool for Peak Access sales operations.
