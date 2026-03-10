@@ -21,12 +21,14 @@ let activeState = {
   mode: "idle",
   draftStatus: "",
   focusNoAnswer: false,
-  focusTalkingPoints: false
+  focusTalkingPoints: false,
+  savingAnsweredNote: false
 };
 let watcherTimer = null;
 let notesSaveTimer = null;
 let manualPanelHidden = false;
 let lastContextKey = "";
+let lastLeadLinkedInLaunchKey = "";
 let launcherTop = null;
 let dragState = {
   active: false,
@@ -85,6 +87,9 @@ async function runDetection(isInitial) {
 
   if (contextKey !== lastContextKey) {
     manualPanelHidden = false;
+    if (!currentContext || currentContext.type !== "lead") {
+      lastLeadLinkedInLaunchKey = "";
+    }
     lastContextKey = contextKey;
   }
 
@@ -92,13 +97,14 @@ async function runDetection(isInitial) {
     renderContainerShell();
     setState({
       loading: false,
-      error: "Open a specific Deal or Person page to load Call Companion context.",
+      error: "Open a specific Deal, Person, or Lead page to load Call Companion context.",
       context: null,
       brief: null,
       mode: "idle",
       draftStatus: "",
       focusNoAnswer: false,
-      focusTalkingPoints: false
+      focusTalkingPoints: false,
+      savingAnsweredNote: false
     });
     await renderBody();
     closePanel();
@@ -114,24 +120,53 @@ async function runDetection(isInitial) {
     closePanel();
   }
 
-  await loadContextAndBrief(currentContext);
+  const loadResult = await loadContextAndBrief(currentContext);
+  if (loadResult?.ok) {
+    await maybeAutoLaunchLinkedIn(currentContext);
+  }
 }
 
 function parsePageContext(href) {
   try {
-    const { pathname } = new URL(href);
+    const parsedUrl = new URL(href);
+    const { pathname, search, hash } = parsedUrl;
     const patterns = [
       { type: "deal", regex: /^\/(?:deal|deals)\/(\d+)(?:\/|$)/i },
-      { type: "person", regex: /^\/(?:person|persons)\/(\d+)(?:\/|$)/i }
+      { type: "person", regex: /^\/(?:person|persons)\/(\d+)(?:\/|$)/i },
+      { type: "lead", regex: /^\/leads\/inbox\/([^/?#]+)(?:\/|$)/i },
+      { type: "lead", regex: /^\/(?:lead|leads)\/([^/?#]+)(?:\/|$)/i },
+      { type: "lead", regex: /^\/leads\/detail\/([^/?#]+)(?:\/|$)/i }
     ];
 
     for (const pattern of patterns) {
       const match = pathname.match(pattern.regex);
       if (match) {
+        if (pattern.type === "lead") {
+          const leadCandidate = decodeURIComponent(match[1]);
+          if (!isLikelyLeadId(leadCandidate)) {
+            continue;
+          }
+        }
         return {
           type: pattern.type,
-          id: Number(match[1])
+          id: pattern.type === "lead" ? decodeURIComponent(match[1]) : Number(match[1])
         };
+      }
+    }
+
+    const leadIdFromFragments = extractLeadIdFromFragments({
+      pathname,
+      search,
+      hash
+    });
+    if (leadIdFromFragments) {
+      return { type: "lead", id: leadIdFromFragments };
+    }
+
+    if (/^\/leads(?:\/|$)/i.test(pathname)) {
+      const leadIdFromDom = detectSelectedLeadIdFromDom();
+      if (leadIdFromDom) {
+        return { type: "lead", id: leadIdFromDom };
       }
     }
 
@@ -139,6 +174,68 @@ function parsePageContext(href) {
   } catch (_error) {
     return null;
   }
+}
+
+function extractLeadIdFromFragments({ pathname, search, hash }) {
+  const candidateSources = [pathname, search, hash];
+  const regexes = [
+    /\/(?:lead|leads)\/([a-z0-9-]{8,})/i,
+    /(?:lead_id|leadId|selectedLeadId)=([a-z0-9-]{8,})/i
+  ];
+
+  for (const source of candidateSources) {
+    const value = String(source || "");
+    for (const regex of regexes) {
+      const match = value.match(regex);
+      if (match?.[1]) {
+        const id = decodeURIComponent(match[1]);
+        if (isLikelyLeadId(id)) return id;
+      }
+    }
+  }
+
+  return "";
+}
+
+function detectSelectedLeadIdFromDom() {
+  const selectors = [
+    'a[aria-current="page"][href*="/lead/"]',
+    'a[aria-current="true"][href*="/lead/"]',
+    'a[href*="/lead/"][data-testid*="selected"]',
+    'a[href*="/lead/"][class*="selected"]',
+    'a[href*="/lead/"][class*="active"]'
+  ];
+
+  for (const selector of selectors) {
+    const el = document.querySelector(selector);
+    const id = extractLeadIdFromHref(el?.getAttribute("href"));
+    if (id) return id;
+  }
+
+  const links = Array.from(document.querySelectorAll('a[href*="/lead/"]'));
+  for (const link of links) {
+    const id = extractLeadIdFromHref(link.getAttribute("href"));
+    if (id) return id;
+  }
+
+  return "";
+}
+
+function extractLeadIdFromHref(href) {
+  const raw = String(href || "");
+  if (!raw) return "";
+  const match = raw.match(/\/lead\/([a-z0-9-]{8,})/i) || raw.match(/\/leads\/([a-z0-9-]{8,})/i);
+  if (!match?.[1]) return "";
+  const id = decodeURIComponent(match[1]);
+  return isLikelyLeadId(id) ? id : "";
+}
+
+function isLikelyLeadId(id) {
+  const value = String(id || "").trim();
+  if (!value) return false;
+  if (/^[a-f0-9]{32}$/i.test(value)) return true;
+  if (/^[a-f0-9-]{24,}$/i.test(value)) return true;
+  return false;
 }
 
 function renderContainerShell() {
@@ -215,8 +312,8 @@ async function loadContextAndBrief(contextRef) {
 
   if (!response.ok) {
     setState({ loading: false, error: response.error || "Failed to load context." });
-    renderBody();
-    return;
+    await renderBody();
+    return { ok: false, error: response.error || "Failed to load context." };
   }
 
   currentPayload = response.data;
@@ -227,7 +324,8 @@ async function loadContextAndBrief(contextRef) {
     brief: response.data.brief
   });
 
-  renderBody();
+  await renderBody();
+  return { ok: true, data: response.data };
 }
 
 function setState(partial) {
@@ -265,14 +363,6 @@ async function renderBody() {
   const options = await getOptions();
 
   body.appendChild(renderContextSummary(context, options));
-  body.appendChild(renderTimeline(context, options));
-  body.appendChild(renderPreCall(brief.preCall));
-  const talkingSection = renderCards(brief.cards);
-  body.appendChild(talkingSection);
-  if (activeState.focusTalkingPoints) {
-    queueFocusTalkingPoints(talkingSection);
-    setState({ focusTalkingPoints: false });
-  }
 
   if (footer) {
     footer.appendChild(renderActions(context, true));
@@ -280,15 +370,6 @@ async function renderBody() {
 
   if (activeState.mode === "answered") {
     body.appendChild(await renderQuickNotes());
-  }
-
-  if (activeState.mode === "no-answer") {
-    const noAnswerSection = renderNoAnswer(brief.noAnswer);
-    body.appendChild(noAnswerSection);
-    if (activeState.focusNoAnswer) {
-      queueFocusNoAnswer(noAnswerSection);
-      setState({ focusNoAnswer: false });
-    }
   }
 
   if (activeState.draftStatus) {
@@ -307,21 +388,23 @@ function renderContextSummary(context) {
 
   const personName = context.person?.name || "Unknown person";
   const orgName = context.org?.name || context.person?.org?.name || "Unknown org";
-  const dealTitle = context.deal?.title || "N/A";
+  const dealTitle = context.deal?.title || context.lead?.title || "N/A";
   const stage = context.deal?.stageId ? `Stage ${context.deal.stageId}` : "N/A";
   const value = context.deal
     ? `${Number(context.deal.value || 0).toLocaleString()} ${context.deal.currency || ""}`.trim()
+    : context.lead
+      ? `${Number(context.lead.value || 0).toLocaleString()} ${context.lead.currency || ""}`.trim()
     : "N/A";
   const title = context.person?.title || "N/A";
-  const owner = context.person?.ownerName || context.deal?.ownerName || "N/A";
+  const owner = context.person?.ownerName || context.deal?.ownerName || context.lead?.ownerName || "N/A";
   const website = context.org?.website || "N/A";
-  const linkedIn = context.person?.linkedIn || "N/A";
+  const linkedIn = context.lead?.linkedIn || context.person?.linkedIn || "N/A";
 
   list.appendChild(labelValueItem("Person", personName));
   list.appendChild(labelValueItem("Title", title));
   list.appendChild(labelValueItem("Org", orgName));
   list.appendChild(labelValueItem("Owner", owner));
-  list.appendChild(labelValueItem("Deal", dealTitle));
+  list.appendChild(labelValueItem(context.type === "lead" ? "Lead" : "Deal", dealTitle));
   list.appendChild(labelValueItem("Stage / Value", `${stage} / ${value}`));
   list.appendChild(labelValueItem("Org Website", website));
   list.appendChild(labelValueItem("LinkedIn Profile", linkedIn));
@@ -395,20 +478,41 @@ function renderActions(context, compact = false) {
   row.className = "cc-actions-row";
 
   const answeredBtn = button("Answered", "cc-btn-primary", () => {
-    setState({ mode: "answered", draftStatus: "", focusTalkingPoints: true });
+    setState({ mode: "answered", draftStatus: "" });
     renderBody();
   });
 
-  const noAnswerBtn = button("No Answer", "cc-btn-primary", () => {
-    setState({ mode: "no-answer", draftStatus: "", focusNoAnswer: true });
+  const noAnswerBtn = button("No Answer", "cc-btn-primary", async () => {
+    const url = getDirectLinkedInUrl(context);
+    if (!url) {
+      setState({
+        mode: "no-answer",
+        draftStatus: "No LinkedIn profile URL found on this record. Add/save the profile URL first."
+      });
+      renderBody();
+      return;
+    }
+    const response = await sendMessage({
+      type: "OPEN_URL",
+      payload: { url, openIn: "window" }
+    });
+    setState({
+      mode: "no-answer",
+      draftStatus: response.ok ? "Opened LinkedIn in a new window." : response.error || "Could not open LinkedIn."
+    });
     renderBody();
   });
 
   const linkedInBtn = button("Open LinkedIn", "cc-btn-secondary", async () => {
-    const url = buildLinkedInUrl(context);
+    const url = getDirectLinkedInUrl(context);
+    if (!url) {
+      setState({ draftStatus: "No LinkedIn profile URL found on this record. Add/save the profile URL first." });
+      renderBody();
+      return;
+    }
     const response = await sendMessage({
       type: "OPEN_URL",
-      payload: { url }
+      payload: { url, openIn: "window" }
     });
 
     if (!response.ok) {
@@ -505,14 +609,15 @@ function queueFocusNoAnswer(sectionEl) {
 }
 
 async function renderQuickNotes() {
-  const section = createSection("Quick notes");
+  const section = createSection("Answered call note");
   const textarea = document.createElement("textarea");
   textarea.className = "cc-notes";
-  textarea.placeholder = "Capture call notes here (local only for MVP)...";
+  textarea.placeholder = "Capture call notes and save to Pipedrive...";
 
   const key = getNotesKey();
   const existing = await getLocalStorage(key);
   textarea.value = String(existing || "");
+  textarea.disabled = Boolean(activeState.savingAnsweredNote);
 
   textarea.addEventListener("input", (event) => {
     const value = event.target?.value || "";
@@ -523,7 +628,40 @@ async function renderQuickNotes() {
     }, 250);
   });
 
+  const saveBtn = button(activeState.savingAnsweredNote ? "Saving..." : "Save Note to Pipedrive", "cc-btn-primary", async () => {
+    if (activeState.savingAnsweredNote) return;
+    const note = String(textarea.value || "").trim();
+    if (!note) {
+      setState({ draftStatus: "Add a note before saving." });
+      renderBody();
+      return;
+    }
+
+    setState({ savingAnsweredNote: true, draftStatus: "" });
+    renderBody();
+
+    const response = await sendMessage({
+      type: "SAVE_ANSWERED_CALL_NOTE",
+      payload: {
+        contextType: currentContext?.type,
+        contextId: currentContext?.id,
+        personId: activeState.context?.person?.id || null,
+        note
+      }
+    });
+
+    if (!response.ok) {
+      setState({ savingAnsweredNote: false, draftStatus: response.error || "Failed to save note to Pipedrive." });
+      renderBody();
+      return;
+    }
+
+    setState({ savingAnsweredNote: false, draftStatus: "Answered note saved to Pipedrive." });
+    renderBody();
+  });
+
   section.appendChild(textarea);
+  section.appendChild(saveBtn);
   return section;
 }
 
@@ -762,13 +900,14 @@ function buildLinkedInQuery(context) {
   const personName = context.person?.name || "";
   const orgName = context.org?.name || context.person?.org?.name || "";
   const title = context.person?.title || "";
+  const leadTitle = context.lead?.title || "";
   const emailDomain = getEmailDomain(context.person?.primaryEmail || "");
 
-  return [personName, title, orgName, emailDomain].filter(Boolean).join(" ");
+  return [personName, title, orgName, leadTitle, emailDomain].filter(Boolean).join(" ");
 }
 
 function buildLinkedInUrl(context) {
-  const direct = canonicalizeLinkedInUrl(context.person?.linkedIn);
+  const direct = findAnyLinkedInUrlInContext(context);
   if (direct) {
     return direct;
   }
@@ -780,14 +919,61 @@ function buildLinkedInUrl(context) {
   return `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(query)}`;
 }
 
+function getDirectLinkedInUrl(context) {
+  return findAnyLinkedInUrlInContext(context);
+}
+
+function findAnyLinkedInUrlInContext(context) {
+  const seen = new Set();
+
+  function walk(value, depth = 0) {
+    if (depth > 5 || value === null || value === undefined) return "";
+    if (typeof value === "string") {
+      return canonicalizeLinkedInUrl(value);
+    }
+
+    if (typeof value !== "object") return "";
+    if (seen.has(value)) return "";
+    seen.add(value);
+
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        const found = walk(item, depth + 1);
+        if (found) return found;
+      }
+      return "";
+    }
+
+    for (const nested of Object.values(value)) {
+      const found = walk(nested, depth + 1);
+      if (found) return found;
+    }
+
+    return "";
+  }
+
+  return walk(context) || "";
+}
+
 function canonicalizeLinkedInUrl(value) {
-  const raw = String(value || "").trim();
+  let raw = String(value || "").trim();
   if (!raw) return "";
 
-  const withProtocol = /^https?:\/\//i.test(raw) ? raw : `https://${raw.replace(/^\/+/, "")}`;
+  raw = raw.replace(/\\\//g, "/").replace(/^"+|"+$/g, "");
+  if (!raw) return "";
+
+  if (/^\/in\//i.test(raw)) {
+    raw = `https://www.linkedin.com${raw}`;
+  } else if (/^in\//i.test(raw)) {
+    raw = `https://www.linkedin.com/${raw}`;
+  } else if (/^[a-z0-9.-]*linkedin\.com\//i.test(raw) && !/^https?:\/\//i.test(raw)) {
+    raw = `https://${raw}`;
+  } else if (!/^https?:\/\//i.test(raw)) {
+    return "";
+  }
 
   try {
-    const parsed = new URL(withProtocol);
+    const parsed = new URL(raw);
     if (!String(parsed.hostname || "").toLowerCase().includes("linkedin.com")) return "";
     parsed.hash = "";
     return parsed.toString().replace(/\/+$/, "");
@@ -811,7 +997,28 @@ function getNotesKey() {
     return `${QUICK_NOTES_PREFIX}unknown`;
   }
 
-  return `${QUICK_NOTES_PREFIX}${currentContext.type}:${currentContext.id}`;
+  return `${QUICK_NOTES_PREFIX}${currentContext.type}:${String(currentContext.id)}`;
+}
+
+async function maybeAutoLaunchLinkedIn(contextRef) {
+  if (!contextRef || contextRef.type !== "lead") return;
+  const context = activeState.context;
+  if (!context) return;
+
+  const launchKey = `${contextRef.type}:${String(contextRef.id)}`;
+  if (lastLeadLinkedInLaunchKey === launchKey) return;
+
+  const url = getDirectLinkedInUrl(context);
+  if (!url) return;
+
+  const response = await sendMessage({
+    type: "OPEN_URL",
+    payload: { url, openIn: "window" }
+  });
+
+  if (response.ok) {
+    lastLeadLinkedInLaunchKey = launchKey;
+  }
 }
 
 function getLocalStorage(key) {

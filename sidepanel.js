@@ -3,11 +3,8 @@ const refs = {
   linkedinContext: document.getElementById("linkedinContext"),
   matchCard: document.getElementById("matchCard"),
   matchCandidates: document.getElementById("matchCandidates"),
-  sequenceSelect: document.getElementById("sequenceSelect"),
+  templateSelect: document.getElementById("templateSelect"),
   stageInput: document.getElementById("stageInput"),
-  templatesList: document.getElementById("templatesList"),
-  talkingPoints: document.getElementById("talkingPoints"),
-  talkingPointsToggle: document.getElementById("talkingPointsToggle"),
   draftText: document.getElementById("draftText"),
   insertBtn: document.getElementById("insertBtn"),
   copyBtn: document.getElementById("copyBtn"),
@@ -15,31 +12,32 @@ const refs = {
   status: document.getElementById("status")
 };
 
+const TEMPLATE_OPTIONS = [
+  { id: "touch_1", label: "Template 1: Intro" },
+  { id: "touch_2", label: "Template 2: Value" },
+  { id: "touch_3", label: "Template 3: Close Loop" }
+];
+
 const state = {
   linkedinContext: null,
   match: null,
-  sequences: [],
-  templates: [],
-  talkingPoints: [],
-  selectedTemplate: null,
-  selectedSequenceId: "",
-  stage: 1,
-  talkingPointsExpanded: false
+  selectedTemplateId: TEMPLATE_OPTIONS[0].id,
+  stage: 1
 };
 
 refs.refreshBtn.addEventListener("click", refreshAll);
-refs.sequenceSelect.addEventListener("change", onSequenceChanged);
+refs.templateSelect.addEventListener("change", onTemplateChanged);
 refs.stageInput.addEventListener("change", onStageChanged);
 refs.insertBtn.addEventListener("click", onInsertTemplate);
 refs.copyBtn.addEventListener("click", onCopy);
 refs.logAdvanceBtn.addEventListener("click", onLogAndAdvance);
-refs.talkingPointsToggle.addEventListener("click", onTalkingPointsToggle);
 
+initTemplateSelect();
+refs.stageInput.value = String(state.stage);
 refreshAll();
-syncTalkingPointsVisibility();
 
 async function refreshAll() {
-  setStatus("Loading LinkedIn Mode context...");
+  setStatus("Loading LinkedIn context...");
 
   const contextResp = await sendRuntimeMessage({ type: "LINKEDIN_GET_CONTEXT" });
   if (!contextResp.ok) {
@@ -63,78 +61,26 @@ async function refreshAll() {
     setStatus(matchResp.error || "Could not match person", true);
   } else {
     state.match = matchResp.data;
-    state.stage = Number(state.match.currentStage || 1);
-    refs.stageInput.value = String(state.stage);
+    if (Number.isFinite(Number(state.match?.currentStage)) && Number(state.match.currentStage) > 0) {
+      state.stage = Number(state.match.currentStage);
+      refs.stageInput.value = String(state.stage);
+    }
     renderMatchCard();
-    await loadTalkingPoints();
   }
 
-  const sequencesResp = await sendRuntimeMessage({ type: "LINKEDIN_GET_SEQUENCES" });
-  if (!sequencesResp.ok) {
-    setStatus(sequencesResp.error || "Could not load sequences", true);
-    return;
-  }
-
-  state.sequences = sequencesResp.data.sequences || [];
-  renderSequenceSelect();
-
-  if (state.sequences.length) {
-    const recommended = String(state.match?.sequenceId || "").trim();
-    const current = String(state.selectedSequenceId || "").trim();
-    const hasCurrent = state.sequences.some((sequence) => sequence.id === current);
-    const hasRecommended = state.sequences.some((sequence) => sequence.id === recommended);
-    const resolved = hasCurrent ? current : hasRecommended ? recommended : state.sequences[0].id;
-    state.selectedSequenceId = resolved;
-    refs.sequenceSelect.value = resolved;
-  }
-
-  await loadTemplates();
+  applyTemplateToComposer();
   setStatus("LinkedIn Mode ready.", false, true);
 }
 
-async function loadTemplates() {
-  if (!state.selectedSequenceId) {
-    state.templates = [];
-    renderTemplates();
-    return;
-  }
-
-  const resp = await sendRuntimeMessage({
-    type: "LINKEDIN_GET_TEMPLATES",
-    payload: {
-      sequenceId: state.selectedSequenceId,
-      stage: state.stage
-    }
+function initTemplateSelect() {
+  refs.templateSelect.innerHTML = "";
+  TEMPLATE_OPTIONS.forEach((template) => {
+    const option = document.createElement("option");
+    option.value = template.id;
+    option.textContent = template.label;
+    refs.templateSelect.appendChild(option);
   });
-
-  if (!resp.ok) {
-    setStatus(resp.error || "Failed to load templates", true);
-    return;
-  }
-
-  state.templates = resp.data.templates || [];
-  renderTemplates();
-}
-
-async function loadTalkingPoints() {
-  state.talkingPoints = [];
-  renderTalkingPoints();
-
-  const personId = state.match?.person?.id;
-  if (!personId) return;
-
-  const resp = await sendRuntimeMessage({
-    type: "LINKEDIN_GET_TALKING_POINTS",
-    payload: { personId }
-  });
-
-  if (!resp.ok) {
-    setStatus(resp.error || "Failed to load talking points", true);
-    return;
-  }
-
-  state.talkingPoints = resp.data?.cards || [];
-  renderTalkingPoints(resp.data?.preCall || null);
+  refs.templateSelect.value = state.selectedTemplateId;
 }
 
 function renderLinkedInContext() {
@@ -159,10 +105,8 @@ function renderMatchCard() {
     renderKeyValueCard(refs.matchCard, [
       { label: "Matched", value: `${match.person.name} (#${match.person.id})` },
       { label: "Org", value: match.person.orgName || "N/A" },
-      { label: "Match strategy", value: match.strategy || "N/A" },
       { label: "DM eligible", value: match.dmEligible ? "Yes" : "No" },
-      { label: "Current stage", value: String(match.currentStage || 1) },
-      { label: "Sequence", value: match.sequenceId || "(none)" }
+      { label: "Current stage", value: String(match.currentStage || 1) }
     ]);
   }
 
@@ -194,7 +138,7 @@ function renderMatchCard() {
 
       state.match = resp.data;
       renderMatchCard();
-      await loadTalkingPoints();
+      applyTemplateToComposer();
       setStatus("Match confirmed and LinkedIn URL saved.", false, true);
     });
 
@@ -203,133 +147,50 @@ function renderMatchCard() {
   });
 }
 
-function renderSequenceSelect() {
-  refs.sequenceSelect.innerHTML = "";
+function onTemplateChanged() {
+  state.selectedTemplateId = refs.templateSelect.value || TEMPLATE_OPTIONS[0].id;
+  applyTemplateToComposer();
+}
 
-  if (!state.sequences.length) {
-    const option = document.createElement("option");
-    option.value = "";
-    option.textContent = "No sequences";
-    refs.sequenceSelect.appendChild(option);
-    return;
-  }
+function onStageChanged() {
+  const stage = Number(refs.stageInput.value || 1);
+  state.stage = Number.isFinite(stage) && stage > 0 ? stage : 1;
+  refs.stageInput.value = String(state.stage);
+  applyTemplateToComposer();
+}
 
-  state.sequences.forEach((sequence) => {
-    const option = document.createElement("option");
-    option.value = sequence.id;
-    option.textContent = sequence.name;
-    refs.sequenceSelect.appendChild(option);
+function applyTemplateToComposer() {
+  refs.draftText.value = buildTemplateMessage({
+    templateId: state.selectedTemplateId,
+    stage: state.stage,
+    context: state.linkedinContext,
+    match: state.match
   });
 }
 
-function renderTemplates() {
-  refs.templatesList.innerHTML = "";
-
-  if (!state.templates.length) {
-    const card = document.createElement("div");
-    card.className = "sp-card";
-    card.textContent = "No templates found for this stage. Try another stage or sequence.";
-    refs.templatesList.appendChild(card);
-    return;
-  }
-
-  state.templates.forEach((template) => {
-    const wrapper = document.createElement("article");
-    wrapper.className = "sp-template";
-
-    const badge = document.createElement("span");
-    badge.className = "sp-badge";
-    badge.textContent = `Stage ${template.stage}`;
-
-    const title = document.createElement("strong");
-    title.textContent = template.label;
-
-    const body = document.createElement("div");
-    body.textContent = renderTemplateBody(template.body);
-
-    const selectBtn = document.createElement("button");
-    selectBtn.type = "button";
-    selectBtn.className = "sp-btn sp-btn-secondary";
-    selectBtn.textContent = "Use Template";
-    selectBtn.addEventListener("click", () => {
-      state.selectedTemplate = template;
-      refs.draftText.value = renderTemplateBody(template.body);
-      setStatus(`Selected template: ${template.label}`);
-    });
-
-    wrapper.appendChild(badge);
-    wrapper.appendChild(title);
-    wrapper.appendChild(body);
-    wrapper.appendChild(selectBtn);
-    refs.templatesList.appendChild(wrapper);
-  });
-}
-
-function renderTalkingPoints(preCall = null) {
-  refs.talkingPoints.innerHTML = "";
-
-  if (preCall?.oneLiner) {
-    const intro = document.createElement("div");
-    intro.className = "sp-card";
-    intro.textContent = preCall.oneLiner;
-    refs.talkingPoints.appendChild(intro);
-  }
-
-  if (!state.talkingPoints.length) {
-    const card = document.createElement("div");
-    card.className = "sp-card";
-    card.textContent = "No talking points yet. Confirm a person match first.";
-    refs.talkingPoints.appendChild(card);
-    return;
-  }
-
-  state.talkingPoints.forEach((cardData) => {
-    const card = document.createElement("article");
-    card.className = "sp-talk-item";
-
-    const title = document.createElement("strong");
-    title.textContent = cardData.title || "Talking point";
-
-    const list = document.createElement("ul");
-    list.style.margin = "0";
-    list.style.paddingLeft = "18px";
-    list.style.display = "grid";
-    list.style.gap = "4px";
-    (cardData.bullets || []).forEach((bullet) => {
-      const li = document.createElement("li");
-      li.textContent = bullet;
-      list.appendChild(li);
-    });
-
-    card.appendChild(title);
-    card.appendChild(list);
-    refs.talkingPoints.appendChild(card);
-  });
-}
-
-function onTalkingPointsToggle() {
-  state.talkingPointsExpanded = !state.talkingPointsExpanded;
-  syncTalkingPointsVisibility();
-}
-
-function syncTalkingPointsVisibility() {
-  refs.talkingPoints.classList.toggle("sp-collapsed", !state.talkingPointsExpanded);
-  refs.talkingPointsToggle.textContent = state.talkingPointsExpanded ? "Hide" : "Show";
-  refs.talkingPointsToggle.setAttribute("aria-expanded", state.talkingPointsExpanded ? "true" : "false");
-}
-
-function renderTemplateBody(body) {
-  const personName = state.match?.person?.name || state.linkedinContext?.profileName || "there";
+function buildTemplateMessage({ templateId, stage, context, match }) {
+  const personName = match?.person?.name || context?.profileName || "there";
   const firstName = String(personName).split(/\s+/)[0] || "there";
-  const org = state.match?.person?.orgName || "your team";
-  const dealTitle = state.match?.person?.dealTitle || "your current initiative";
+  const org = match?.person?.orgName || "your team";
 
-  return String(body || "")
-    .replace(/\{\{\s*personFirstName\s*\}\}/g, firstName)
-    .replace(/\{\{\s*personName\s*\}\}/g, personName)
-    .replace(/\{\{\s*orgName\s*\}\}/g, org)
-    .replace(/\{\{\s*useCaseOrDeal\s*\}\}/g, dealTitle)
-    .replace(/\{\{\s*valueHook\s*\}\}/g, "a faster and more predictable follow-up process");
+  const intros = {
+    1: "quick intro",
+    2: "follow-up",
+    3: "value add",
+    4: "close loop"
+  };
+
+  const stageTone = intros[stage] || `stage ${stage} follow-up`;
+
+  if (templateId === "touch_2") {
+    return `Hi ${firstName}, sharing one idea for ${org} based on our ${stageTone}. If useful, I can send a short 2-step outline.`;
+  }
+
+  if (templateId === "touch_3") {
+    return `Hi ${firstName}, just closing the loop on our ${stageTone}. If this is still relevant for ${org}, happy to align on next steps.`;
+  }
+
+  return `Hi ${firstName}, thanks for connecting. Reaching out as a ${stageTone} for ${org}. Open to a quick exchange this week?`;
 }
 
 async function onInsertTemplate() {
@@ -352,9 +213,9 @@ async function onInsertTemplate() {
   if (resp.data.inserted) {
     setStatus("Template inserted into LinkedIn composer.", false, true);
   } else if (resp.data.copied) {
-    setStatus("Composer unavailable; copied to clipboard instead.", false, true);
+    setStatus("Composer unavailable; copied to clipboard.", false, true);
   } else {
-    setStatus("Could not insert template or copy to clipboard.", true);
+    setStatus("Could not insert template.", true);
   }
 }
 
@@ -399,8 +260,8 @@ async function onLogAndAdvance() {
     payload: {
       personId: state.match.person.id,
       profileUrl: state.linkedinContext?.profileUrl || "",
-      sequenceId: state.selectedSequenceId,
-      templateId: state.selectedTemplate?.id || "manual",
+      sequenceId: "manual_template_flow",
+      templateId: state.selectedTemplateId,
       dmText,
       currentStage: Number(refs.stageInput.value || state.stage || 1)
     }
@@ -411,27 +272,16 @@ async function onLogAndAdvance() {
     return;
   }
 
-  state.match = {
-    ...state.match,
-    currentStage: resp.data.nextStage,
-    dmEligible: resp.data.dmEligible
-  };
   state.stage = Number(resp.data.nextStage || state.stage + 1);
   refs.stageInput.value = String(state.stage);
-  renderMatchCard();
-  await loadTemplates();
+  applyTemplateToComposer();
 
-  setStatus(`Logged to Pipedrive and advanced to stage ${resp.data.nextStage}.`, false, true);
-}
+  if (resp.data.activityWarning) {
+    setStatus(`Logged note + advanced to stage ${resp.data.nextStage}. Activity warning: ${resp.data.activityWarning}`, true);
+    return;
+  }
 
-async function onSequenceChanged() {
-  state.selectedSequenceId = refs.sequenceSelect.value;
-  await loadTemplates();
-}
-
-async function onStageChanged() {
-  state.stage = Number(refs.stageInput.value || 1);
-  await loadTemplates();
+  setStatus(`Logged activity + note and advanced to stage ${resp.data.nextStage}.`, false, true);
 }
 
 function setStatus(message, isError = false, isSuccess = false) {
@@ -446,7 +296,6 @@ function sendRuntimeMessage(message) {
         resolve({ ok: false, error: chrome.runtime.lastError.message || "Runtime error" });
         return;
       }
-
       resolve(response || { ok: false, error: "No response" });
     });
   });

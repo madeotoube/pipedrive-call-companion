@@ -2,6 +2,7 @@ import { base64UrlEncode, buildRfc2822Message } from "./lib/email.js";
 import { APP_CONFIG, DEFAULT_STORAGE } from "./src/config.js";
 import {
   canonicalizeLinkedInUrl,
+  createLinkedInDmActivity,
   createLinkedInDmLog,
   fetchPersonById,
   searchPersonByEmail,
@@ -116,6 +117,9 @@ async function handleMessage(message, sender) {
   if (msgType === "SAVE_EMAIL_TO_PIPEDRIVE_PERSON") {
     return handleSaveEmail(message?.payload || {}, sender);
   }
+  if (msgType === "SAVE_ANSWERED_CALL_NOTE") {
+    return handleSaveAnsweredCallNote(message?.payload || {}, sender);
+  }
 
   if (msgType === "OPEN_LINKEDIN_SIDE_PANEL") {
     return handleOpenLinkedInSidePanel(sender);
@@ -177,9 +181,18 @@ async function handleMessage(message, sender) {
 async function handleGetContextAndBrief(message, sender) {
   const payload = message?.payload || {};
   const contextType = payload.type;
-  const id = Number(payload.id);
+  const rawId = payload.id;
 
-  if (!["deal", "person"].includes(contextType) || !Number.isFinite(id) || id <= 0) {
+  if (!["deal", "person", "lead"].includes(contextType)) {
+    throw new Error("Invalid context payload.");
+  }
+
+  const id = contextType === "lead" ? String(rawId || "").trim() : Number(rawId);
+  if (contextType === "lead") {
+    if (!id) {
+      throw new Error("Invalid lead id.");
+    }
+  } else if (!Number.isFinite(id) || id <= 0) {
     throw new Error("Invalid context payload.");
   }
 
@@ -195,8 +208,10 @@ async function handleGetContextAndBrief(message, sender) {
 
   if (contextType === "deal") {
     context = await buildDealContext(id, baseOrigin, options.apiToken, options);
-  } else {
+  } else if (contextType === "person") {
     context = await buildPersonContext(id, baseOrigin, options.apiToken, options);
+  } else {
+    context = await buildLeadContext(id, baseOrigin, options.apiToken, options);
   }
 
   return {
@@ -254,11 +269,21 @@ async function handleOpenUrl(payload) {
     throw new Error("URL is required.");
   }
 
+  const openIn = String(payload?.openIn || "tab").toLowerCase();
+
   try {
-    await chrome.tabs.create({ url: normalized });
-    return { opened: true, url: normalized };
+    if (openIn === "window") {
+      const win = await chrome.windows.create({
+        url: normalized,
+        focused: true
+      });
+      return { opened: true, url: normalized, openIn: "window", windowId: win?.id || null };
+    }
+
+    const tab = await chrome.tabs.create({ url: normalized });
+    return { opened: true, url: normalized, openIn: "tab", tabId: tab?.id || null };
   } catch (_error) {
-    throw new Error("Failed to open the URL in a new tab.");
+    throw new Error(openIn === "window" ? "Failed to open the URL in a new window." : "Failed to open the URL in a new tab.");
   }
 }
 
@@ -294,6 +319,68 @@ async function handleSaveEmail(payload, sender) {
 
   return {
     person: pickPersonFields(updated, options)
+  };
+}
+
+async function handleSaveAnsweredCallNote(payload, sender) {
+  const contextType = String(payload.contextType || "").trim().toLowerCase();
+  const contextIdRaw = payload.contextId;
+  const personId = Number(payload.personId);
+  const note = String(payload.note || "").trim();
+
+  if (!["deal", "person", "lead"].includes(contextType)) {
+    throw new Error("Invalid context type for note save.");
+  }
+  if (!note) {
+    throw new Error("Note content is required.");
+  }
+
+  const contextId = contextType === "lead" ? String(contextIdRaw || "").trim() : Number(contextIdRaw);
+  if (contextType === "lead") {
+    if (!contextId) throw new Error("Invalid lead id.");
+  } else if (!Number.isFinite(contextId) || contextId <= 0) {
+    throw new Error("Invalid context id.");
+  }
+
+  const options = await getOptions();
+  if (!options.apiToken) {
+    throw new Error("Pipedrive API token missing. Open extension options and save your token.");
+  }
+
+  const baseOrigin = getBaseOrigin(sender?.url || payload.baseOrigin);
+  lastKnownPipedriveOrigin = baseOrigin;
+
+  const stamp = new Date().toLocaleString();
+  const lines = [
+    "Call Outcome: Answered",
+    `Timestamp: ${stamp}`,
+    "",
+    note
+  ];
+  const content = lines.map((line) => escapeHtml(line)).join("<br>");
+
+  const notePayload = { content };
+  if (Number.isFinite(personId) && personId > 0) {
+    notePayload.person_id = personId;
+  }
+  if (contextType === "deal") {
+    notePayload.deal_id = contextId;
+  } else if (contextType === "person") {
+    notePayload.person_id = Number.isFinite(personId) && personId > 0 ? personId : contextId;
+  } else if (contextType === "lead") {
+    notePayload.lead_id = String(contextId);
+  }
+
+  const saved = await fetchPipedrive({
+    path: "/api/v1/notes",
+    method: "POST",
+    baseOrigin,
+    apiToken: options.apiToken,
+    body: notePayload
+  });
+
+  return {
+    noteId: saved?.id || null
   };
 }
 
@@ -449,6 +536,149 @@ async function buildPersonContext(personId, baseOrigin, apiToken, options) {
   };
 }
 
+async function buildLeadContext(leadId, baseOrigin, apiToken, options) {
+  const encodedLeadId = encodeURIComponent(String(leadId));
+  let leadRaw = null;
+  try {
+    leadRaw = await fetchPipedrive({
+      path: `/api/v1/leads/${encodedLeadId}`,
+      baseOrigin,
+      apiToken
+    });
+  } catch (error) {
+    const msg = String(error?.message || "");
+    if (msg.includes("resource not found")) {
+      throw new Error(`Lead not found in Pipedrive for id '${String(leadId)}'.`);
+    }
+    throw error;
+  }
+  const lead = pickLeadFields(leadRaw);
+  if (!lead) {
+    throw new Error("Lead not found for this page context.");
+  }
+
+  const personId = normalizeEntityId(lead.person);
+  const orgId = normalizeEntityId(lead.org);
+
+  const [personRaw, orgRaw, activitiesRaw, notesRaw, dealsRaw, dealFieldsRaw, personFieldsRaw] = await Promise.all([
+    personId
+      ? fetchPipedrive({ path: `/api/v1/persons/${personId}`, baseOrigin, apiToken })
+      : Promise.resolve(null),
+    orgId ? fetchPipedrive({ path: `/api/v1/organizations/${orgId}`, baseOrigin, apiToken }) : Promise.resolve(null),
+    options.showActivities
+      ? safeFetchPipedriveOr({
+          fallback: [],
+          config: {
+            path: `/api/v1/activities?lead_id=${encodedLeadId}&limit=20&sort=due_date%20DESC`,
+            baseOrigin,
+            apiToken,
+            dataIsArray: true
+          }
+        })
+      : Promise.resolve([]),
+    options.showNotes
+      ? safeFetchPipedriveOr({
+          fallback: [],
+          config: {
+            path: `/api/v1/notes?lead_id=${encodedLeadId}&limit=20&sort=add_time%20DESC`,
+            baseOrigin,
+            apiToken,
+            dataIsArray: true
+          }
+        })
+      : Promise.resolve([]),
+    personId
+      ? safeFetchPipedriveOr({
+          fallback: [],
+          config: {
+            path: `/api/v1/persons/${personId}/deals?status=open&limit=20&sort=update_time%20DESC`,
+            baseOrigin,
+            apiToken,
+            dataIsArray: true
+          }
+        })
+      : Promise.resolve([]),
+    safeFetchPipedriveOr({
+      fallback: [],
+      config: {
+        path: "/api/v1/dealFields?limit=500",
+        baseOrigin,
+        apiToken,
+        dataIsArray: true
+      }
+    }),
+    safeFetchPipedriveOr({
+      fallback: [],
+      config: {
+        path: "/api/v1/personFields?limit=500",
+        baseOrigin,
+        apiToken,
+        dataIsArray: true
+      }
+    })
+  ]);
+
+  const person =
+    pickPersonFields(personRaw, options) ||
+    (lead.person
+      ? {
+          id: normalizeEntityId(lead.person),
+          name: lead.person.name || "Unknown person",
+          firstName: firstToken(lead.person.name) || "",
+          lastName: lastToken(lead.person.name) || "",
+          title: "",
+          ownerName: lead.ownerName || "",
+          primaryEmail: "",
+          primaryPhone: "",
+          emails: [],
+          phones: [],
+          linkedIn: lead.linkedIn || "",
+          org: normalizeEntity(lead.org, lead.org?.name),
+          updateTime: lead.updateTime || null
+        }
+      : null);
+  if (person && !person.linkedIn && lead.linkedIn) {
+    person.linkedIn = lead.linkedIn;
+  }
+  const org = pickOrgFields(orgRaw);
+  const dealLikeLead = {
+    id: lead.id,
+    title: lead.title,
+    value: lead.value,
+    currency: lead.currency,
+    stageId: null,
+    pipelineId: null,
+    status: lead.status || "open",
+    ownerName: lead.ownerName || person?.ownerName || "Unknown owner",
+    updateTime: lead.updateTime || null,
+    person:
+      (lead.person || person?.id)
+        ? { id: person?.id || personId, name: person?.name || lead.person?.name || null }
+        : null,
+    org:
+      (lead.org || org?.id)
+        ? { id: org?.id || orgId, name: org?.name || lead.org?.name || null }
+        : null
+  };
+
+  return {
+    type: "lead",
+    lead,
+    deal: dealLikeLead,
+    person,
+    org,
+    openDeals: Array.isArray(dealsRaw) ? dealsRaw.map(pickDealFields) : [],
+    activities: Array.isArray(activitiesRaw) ? activitiesRaw.map(pickActivityFields) : [],
+    notes: Array.isArray(notesRaw) ? notesRaw.map(pickNoteFields) : [],
+    customInsights: buildCustomInsights({
+      dealRaw: null,
+      personRaw,
+      dealFieldDefs: dealFieldsRaw,
+      personFieldDefs: personFieldsRaw
+    })
+  };
+}
+
 function pickDealFields(deal) {
   if (!deal) return null;
 
@@ -464,6 +694,24 @@ function pickDealFields(deal) {
     updateTime: deal.update_time || null,
     person: normalizeEntity(deal.person_id, deal.person_name),
     org: normalizeEntity(deal.org_id, deal.org_name)
+  };
+}
+
+function pickLeadFields(lead) {
+  if (!lead) return null;
+
+  return {
+    id: String(lead.id || ""),
+    title: lead.title || "Untitled lead",
+    value: Number(lead.value) || 0,
+    currency: lead.currency || "",
+    status: lead.status || "open",
+    ownerName: lead.owner_id?.name || lead.owner_name || "Unknown owner",
+    addTime: lead.add_time || null,
+    updateTime: lead.update_time || null,
+    linkedIn: findLinkedInUrlFromEntity(lead),
+    person: normalizeEntity(lead.person_id, lead.person_name),
+    org: normalizeEntity(lead.organization_id || lead.org_id, lead.org_name || lead.organization_name)
   };
 }
 
@@ -1103,6 +1351,15 @@ function compactAddress(org) {
   return parts.join(", ");
 }
 
+function escapeHtml(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 function findLinkedInUrl(person, options = {}) {
   if (!person) return "";
 
@@ -1124,29 +1381,90 @@ function findLinkedInUrl(person, options = {}) {
   }
 
   const rawWebsite = String(person.website || person.linkedin || "").trim();
-  if (rawWebsite.toLowerCase().includes("linkedin.com")) {
-    return normalizeLinkedInUrl(rawWebsite);
+  const normalizedWebsite = normalizeLinkedInUrl(rawWebsite);
+  if (normalizedWebsite) return normalizedWebsite;
+
+  // Final fallback: scan all person fields, including custom fields.
+  const discovered = findLinkedInUrlFromEntity(person);
+  if (discovered) return discovered;
+
+  return "";
+}
+
+function findLinkedInUrlFromEntity(entity, depth = 0) {
+  if (!entity || depth > 3) return "";
+
+  if (typeof entity === "string") {
+    return normalizeLinkedInUrl(entity);
+  }
+
+  if (Array.isArray(entity)) {
+    for (const item of entity) {
+      const found = findLinkedInUrlFromEntity(item, depth + 1);
+      if (found) return found;
+    }
+    return "";
+  }
+
+  if (typeof entity === "object") {
+    for (const [key, value] of Object.entries(entity)) {
+      const keyName = String(key || "").toLowerCase();
+      if (keyName.includes("linkedin")) {
+        const found = findLinkedInUrlFromEntity(value, depth + 1);
+        if (found) return found;
+      }
+      if (typeof value === "string") {
+        const normalized = normalizeLinkedInUrl(value);
+        if (normalized) return normalized;
+      }
+    }
+
+    for (const value of Object.values(entity)) {
+      const found = findLinkedInUrlFromEntity(value, depth + 1);
+      if (found) return found;
+    }
   }
 
   return "";
 }
 
 function normalizeLinkedInUrl(value) {
-  const raw = String(value || "").trim();
+  const raw = normalizeLinkedInCandidate(value);
   if (!raw) return "";
 
-  const withProtocol = /^https?:\/\//i.test(raw) ? raw : `https://${raw.replace(/^\/+/, "")}`;
-
   try {
-    const parsed = new URL(withProtocol);
+    const parsed = new URL(raw);
     if (!String(parsed.hostname || "").toLowerCase().includes("linkedin.com")) {
-      return raw;
+      return "";
     }
     parsed.hash = "";
     return parsed.toString().replace(/\/+$/, "");
   } catch (_error) {
+    return "";
+  }
+}
+
+function normalizeLinkedInCandidate(value) {
+  let raw = String(value || "").trim();
+  if (!raw) return "";
+
+  raw = raw.replace(/\\\//g, "/").replace(/^"+|"+$/g, "");
+  if (!raw) return "";
+
+  if (/^\/in\//i.test(raw)) {
+    return `https://www.linkedin.com${raw}`;
+  }
+  if (/^in\//i.test(raw)) {
+    return `https://www.linkedin.com/${raw}`;
+  }
+  if (/^[a-z0-9.-]*linkedin\.com\//i.test(raw) && !/^https?:\/\//i.test(raw)) {
+    return `https://${raw}`;
+  }
+  if (/^https?:\/\//i.test(raw)) {
     return raw;
   }
+
+  return "";
 }
 
 async function handleOpenLinkedInSidePanel(sender) {
@@ -1422,8 +1740,10 @@ async function handleLinkedInLogAndAdvance(payload) {
 
   const baseOrigin = getBaseOriginFromActiveTabOrFallback();
   const now = new Date().toISOString();
+  const today = now.slice(0, 10);
+  const subject = `LinkedIn DM sent (Stage ${currentStage})`;
 
-  await createLinkedInDmLog({
+  const noteResult = await createLinkedInDmLog({
     baseOrigin,
     apiToken: options.apiToken,
     personId,
@@ -1434,6 +1754,22 @@ async function handleLinkedInLogAndAdvance(payload) {
     timestamp: now,
     messageBody: dmText
   });
+
+  let activityResult = null;
+  let activityWarning = "";
+  try {
+    activityResult = await createLinkedInDmActivity({
+      baseOrigin,
+      apiToken: options.apiToken,
+      personId,
+      subject,
+      type: "task",
+      dueDate: today,
+      note: dmText
+    });
+  } catch (error) {
+    activityWarning = toUserError(error);
+  }
 
   await updatePersonFields({
     baseOrigin,
@@ -1451,7 +1787,10 @@ async function handleLinkedInLogAndAdvance(payload) {
   return {
     ok: true,
     nextStage,
-    dmEligible: false
+    dmEligible: false,
+    noteId: noteResult?.id || null,
+    activityId: activityResult?.id || null,
+    activityWarning
   };
 }
 

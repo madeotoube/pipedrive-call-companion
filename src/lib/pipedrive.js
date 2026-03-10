@@ -234,6 +234,38 @@ async function createLinkedInDmLog({
   return note;
 }
 
+async function createLinkedInDmActivity({
+  baseOrigin,
+  apiToken,
+  personId,
+  subject,
+  type = "task",
+  note,
+  dueDate
+}) {
+  if (!personId) {
+    throw new Error("personId is required for LinkedIn DM activity logging.");
+  }
+
+  const normalizedDueDate = String(dueDate || new Date().toISOString().slice(0, 10));
+  const activityPayload = {
+    person_id: personId,
+    subject: String(subject || "LinkedIn outreach message sent"),
+    type: String(type || "task"),
+    done: true,
+    due_date: normalizedDueDate,
+    note: note || ""
+  };
+
+  return pipedriveRequest({
+    baseOrigin,
+    apiToken,
+    path: "/api/v1/activities",
+    method: "POST",
+    body: activityPayload
+  });
+}
+
 function escapeHtml(value) {
   return String(value || "")
     .replace(/&/g, "&amp;")
@@ -262,5 +294,6 @@ export {
   searchPersonByEmail,
   searchPersonByName,
   updatePersonFields,
-  createLinkedInDmLog
+  createLinkedInDmLog,
+  createLinkedInDmActivity
 };

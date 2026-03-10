@@ -1,6 +1,11 @@
 const HOST_ID = "peak-access-linkedin-host";
 const SHADOW_WRAPPER_CLASS = "pa-linkedin-wrapper";
 const LINKEDIN_LAUNCHER_TOP_KEY = "linkedInModeLauncherTop";
+const LINKEDIN_TEMPLATE_OPTIONS = [
+  { id: "touch_1", label: "Template 1: Intro" },
+  { id: "touch_2", label: "Template 2: Value" },
+  { id: "touch_3", label: "Template 3: Close Loop" }
+];
 const STATE = {
   mounted: false,
   shadowRoot: null,
@@ -19,13 +24,10 @@ const STATE = {
     context: null,
     match: null,
     candidates: [],
-    sequences: [],
     templates: [],
-    talkingPoints: [],
-    selectedSequenceId: "",
+    selectedTemplateId: "touch_1",
     selectedTemplate: null,
-    stage: 1,
-    talkingPointsExpanded: false
+    stage: 1
   }
 };
 
@@ -497,17 +499,10 @@ function createFallbackDrawer() {
       <div id="paCandidateList" class="pa-list"></div>
     </section>
     <section class="pa-section">
-      <h3>Sequence & Templates</h3>
-      <select id="paSequenceSelect" class="pa-select"></select>
+      <h3>Message Templates</h3>
+      <select id="paTemplateSelect" class="pa-select"></select>
       <input id="paStageInput" class="pa-input" type="number" min="1" step="1" />
       <div id="paTemplateList" class="pa-list"></div>
-    </section>
-    <section class="pa-section">
-      <div class="pa-section-head">
-        <h3>Talking Points</h3>
-        <button id="paTalkingToggle" class="pa-secondary" type="button" aria-expanded="false">Show</button>
-      </div>
-      <div id="paTalkingPoints" class="pa-list pa-collapsed"></div>
     </section>
     <section class="pa-section">
       <h3>Composer</h3>
@@ -625,8 +620,8 @@ function updateDrawerState() {
 
 function wireFallbackEvents(drawer) {
   drawer.querySelector("#paRefreshBtn")?.addEventListener("click", () => refreshFallbackData());
-  drawer.querySelector("#paSequenceSelect")?.addEventListener("change", async (event) => {
-    STATE.fallback.selectedSequenceId = String(event.target?.value || "");
+  drawer.querySelector("#paTemplateSelect")?.addEventListener("change", async (event) => {
+    STATE.fallback.selectedTemplateId = String(event.target?.value || LINKEDIN_TEMPLATE_OPTIONS[0].id);
     await loadFallbackTemplates();
   });
   drawer.querySelector("#paStageInput")?.addEventListener("change", async (event) => {
@@ -692,7 +687,7 @@ function wireFallbackEvents(drawer) {
       payload: {
         personId,
         profileUrl: STATE.fallback.context?.profileUrl || "",
-        sequenceId: STATE.fallback.selectedSequenceId,
+        sequenceId: "manual_template_flow",
         templateId: STATE.fallback.selectedTemplate?.id || "manual",
         dmText,
         currentStage: Number(STATE.fallback.stage || 1)
@@ -705,13 +700,15 @@ function wireFallbackEvents(drawer) {
     const stageInput = drawer.querySelector("#paStageInput");
     if (stageInput) stageInput.value = String(STATE.fallback.stage);
     await loadFallbackTemplates();
-    setFallbackStatus(`Logged and advanced to stage ${STATE.fallback.stage}.`, false);
+    if (response.data?.activityWarning) {
+      setFallbackStatus(
+        `Logged note and advanced to stage ${STATE.fallback.stage}. Activity warning: ${response.data.activityWarning}`,
+        true
+      );
+      return;
+    }
+    setFallbackStatus(`Logged activity + note and advanced to stage ${STATE.fallback.stage}.`, false);
   });
-  drawer.querySelector("#paTalkingToggle")?.addEventListener("click", () => {
-    STATE.fallback.talkingPointsExpanded = !STATE.fallback.talkingPointsExpanded;
-    syncFallbackTalkingVisibility(drawer);
-  });
-  syncFallbackTalkingVisibility(drawer);
 }
 
 async function runFallbackPersonSearch(drawer) {
@@ -768,7 +765,7 @@ async function runConfirmMatch(drawer, personId) {
   STATE.fallback.match = response.data;
   STATE.fallback.candidates = [];
   renderMatch(drawer, response.data.person, [], "");
-  await loadFallbackTalkingPoints(drawer);
+  await loadFallbackTemplates();
   setFallbackStatus(`Match saved: ${response.data.person?.name || `#${personId}`}.`);
   setMatchCardMessage(drawer, `Matched: ${response.data.person?.name || `#${personId}`}`);
 }
@@ -822,30 +819,9 @@ async function refreshFallbackData() {
       await runFallbackPersonSearch(drawer);
     }
 
-    await loadFallbackTalkingPoints(drawer);
+    await loadFallbackTemplates();
   }
-
-  const sequencesResponse = await sendRuntimeMessage({ type: "LINKEDIN_GET_SEQUENCES" });
-  if (!sequencesResponse.ok) {
-    return setFallbackStatus(sequencesResponse.error || "Sequence fetch failed.", true);
-  }
-
-  STATE.fallback.sequences = sequencesResponse.data?.sequences || [];
-  renderSequenceSelect(drawer);
-  if (STATE.fallback.sequences.length) {
-    const recommended = String(STATE.fallback.match?.sequenceId || "").trim();
-    const current = String(STATE.fallback.selectedSequenceId || "").trim();
-    const hasCurrent = STATE.fallback.sequences.some((sequence) => sequence.id === current);
-    const hasRecommended = STATE.fallback.sequences.some((sequence) => sequence.id === recommended);
-    STATE.fallback.selectedSequenceId = hasCurrent
-      ? current
-      : hasRecommended
-        ? recommended
-        : STATE.fallback.sequences[0].id;
-  }
-  const sequenceSelect = drawer.querySelector("#paSequenceSelect");
-  if (sequenceSelect) sequenceSelect.value = STATE.fallback.selectedSequenceId;
-
+  renderTemplateSelect(drawer);
   await loadFallbackTemplates();
   setFallbackStatus("Ready.");
 }
@@ -853,102 +829,58 @@ async function refreshFallbackData() {
 async function loadFallbackTemplates() {
   const drawer = STATE.shadowRoot?.getElementById("pa-linkedin-drawer");
   if (!drawer) return;
-
-  if (!STATE.fallback.selectedSequenceId) {
-    STATE.fallback.templates = [];
-    renderTemplates(drawer);
-    return;
-  }
-
-  const response = await sendRuntimeMessage({
-    type: "LINKEDIN_GET_TEMPLATES",
-    payload: {
-      sequenceId: STATE.fallback.selectedSequenceId,
-      stage: Number(STATE.fallback.stage || 1)
-    }
-  });
-
-  if (!response.ok) {
-    STATE.fallback.templates = [];
-    renderTemplates(drawer);
-    return setFallbackStatus(response.error || "Template fetch failed.", true);
-  }
-
-  STATE.fallback.templates = response.data?.templates || [];
+  const stage = Number(STATE.fallback.stage || 1);
+  STATE.fallback.templates = LINKEDIN_TEMPLATE_OPTIONS.map((template) => ({
+    id: template.id,
+    stage,
+    label: template.label,
+    body: buildLinkedInStageTemplate(template.id, stage)
+  }));
   renderTemplates(drawer);
-}
-
-async function loadFallbackTalkingPoints(drawer) {
-  const root = drawer.querySelector("#paTalkingPoints");
-  if (!root) return;
-  root.innerHTML = "";
-  STATE.fallback.talkingPoints = [];
-
-  const personId = STATE.fallback.match?.person?.id;
-  if (!personId) {
-    root.innerHTML = `<div class=\"pa-card\">No talking points yet. Confirm a person match first.</div>`;
-    return;
-  }
-
-  const response = await sendRuntimeMessage({
-    type: "LINKEDIN_GET_TALKING_POINTS",
-    payload: { personId }
-  });
-
-  if (!response.ok) {
-    root.innerHTML = `<div class=\"pa-card\">${response.error || "Failed to load talking points."}</div>`;
-    return;
-  }
-
-  const preCall = response.data?.preCall || null;
-  const cards = response.data?.cards || [];
-  STATE.fallback.talkingPoints = cards;
-
-  if (preCall?.oneLiner) {
-    const intro = document.createElement("div");
-    intro.className = "pa-card";
-    intro.textContent = preCall.oneLiner;
-    root.appendChild(intro);
-  }
-
-  cards.forEach((cardData) => {
-    const item = document.createElement("div");
-    item.className = "pa-talk-item";
-
-    const title = document.createElement("strong");
-    title.textContent = cardData.title || "Talking point";
-    item.appendChild(title);
-
-    const list = document.createElement("ul");
-    list.style.margin = "0";
-    list.style.paddingLeft = "18px";
-    list.style.display = "grid";
-    list.style.gap = "4px";
-    (cardData.bullets || []).forEach((bullet) => {
-      const li = document.createElement("li");
-      li.textContent = bullet;
-      list.appendChild(li);
-    });
-    item.appendChild(list);
-    root.appendChild(item);
-  });
-
-  if (!preCall?.oneLiner && !cards.length) {
-    root.innerHTML = `<div class=\"pa-card\">No talking points available.</div>`;
+  const selected = STATE.fallback.templates.find((item) => item.id === STATE.fallback.selectedTemplateId) || STATE.fallback.templates[0];
+  STATE.fallback.selectedTemplate = selected || null;
+  const draft = drawer.querySelector("#paDraftText");
+  if (draft && selected) {
+    draft.value = interpolateTemplate(selected.body);
   }
 }
 
-function renderSequenceSelect(drawer) {
-  const select = drawer.querySelector("#paSequenceSelect");
+
+function renderTemplateSelect(drawer) {
+  const select = drawer.querySelector("#paTemplateSelect");
   if (!select) return;
   select.innerHTML = "";
-
-  STATE.fallback.sequences.forEach((sequence) => {
+  LINKEDIN_TEMPLATE_OPTIONS.forEach((template) => {
     const option = document.createElement("option");
-    option.value = sequence.id;
-    option.textContent = sequence.name;
+    option.value = template.id;
+    option.textContent = template.label;
     select.appendChild(option);
   });
+  select.value = STATE.fallback.selectedTemplateId || LINKEDIN_TEMPLATE_OPTIONS[0].id;
+}
+
+function buildLinkedInStageTemplate(templateId, stage) {
+  const stageNum = Number(stage || 1);
+  const stageText = stageNum === 1
+    ? "quick intro"
+    : stageNum === 2
+      ? "follow-up"
+      : stageNum === 3
+        ? "value add"
+        : "close loop";
+
+  if (templateId === "touch_2") {
+    return "Hi {{personFirstName}}, sharing one idea for {{orgName}} based on our " +
+      `${stageText}. If useful, I can send a short 2-step outline.`;
+  }
+
+  if (templateId === "touch_3") {
+    return "Hi {{personFirstName}}, just closing the loop on our " +
+      `${stageText}. If this is still relevant for {{orgName}}, happy to align on next steps.`;
+  }
+
+  return "Hi {{personFirstName}}, thanks for connecting. Reaching out as a " +
+    `${stageText} for {{orgName}}. Open to a quick exchange this week?`;
 }
 
 function renderTemplates(drawer) {
@@ -971,6 +903,7 @@ function renderTemplates(drawer) {
     useBtn.className = "pa-secondary";
     useBtn.textContent = "Use Template";
     useBtn.addEventListener("click", () => {
+      STATE.fallback.selectedTemplateId = template.id;
       STATE.fallback.selectedTemplate = template;
       const draft = drawer.querySelector("#paDraftText");
       if (draft) draft.value = interpolateTemplate(template.body);
@@ -980,16 +913,6 @@ function renderTemplates(drawer) {
     item.appendChild(useBtn);
     root.appendChild(item);
   });
-}
-
-function syncFallbackTalkingVisibility(drawer) {
-  const root = drawer.querySelector("#paTalkingPoints");
-  const toggle = drawer.querySelector("#paTalkingToggle");
-  if (!root || !toggle) return;
-
-  root.classList.toggle("pa-collapsed", !STATE.fallback.talkingPointsExpanded);
-  toggle.textContent = STATE.fallback.talkingPointsExpanded ? "Hide" : "Show";
-  toggle.setAttribute("aria-expanded", STATE.fallback.talkingPointsExpanded ? "true" : "false");
 }
 
 function renderContextCard(drawer, text) {
@@ -1222,8 +1145,11 @@ function getMessagingThreadTitle() {
 function getComposerEditable() {
   const candidates = [
     "div.msg-form__contenteditable[contenteditable='true']",
+    "div.msg-form__contenteditable[role='textbox']",
     "div[role='textbox'][contenteditable='true']",
-    ".msg-form__contenteditable"
+    ".msg-form__contenteditable",
+    "textarea[name='message']",
+    "textarea.msg-form__contenteditable"
   ];
 
   for (const selector of candidates) {
@@ -1239,40 +1165,42 @@ function isVisible(el) {
   return rect.width > 0 && rect.height > 0;
 }
 
-function ensureMessageComposerOpen() {
+async function ensureMessageComposerOpen() {
   const existing = getComposerEditable();
   if (existing) return existing;
 
-  const openComposerButtons = Array.from(document.querySelectorAll("button, a"));
-  const target = openComposerButtons.find((element) => {
-    const text = String(element.textContent || "").trim().toLowerCase();
-    return text.includes("message") || text.includes("new message") || text.includes("send message");
-  });
-
-  if (target) {
-    target.click();
+  const triggers = getComposerOpenTriggers();
+  for (const trigger of triggers) {
+    trigger.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+    const found = await waitForComposer(1600);
+    if (found) return found;
   }
 
-  return getComposerEditable();
+  return await waitForComposer(1200);
 }
 
 async function setComposerText(text) {
-  const composer = ensureMessageComposerOpen();
+  const composer = await ensureMessageComposerOpen();
   if (!composer) return false;
 
   composer.focus();
-  clearContentEditable(composer);
+  const nextText = String(text || "").trim();
+  if (!nextText) return false;
 
-  const lines = String(text || "").split(/\n/);
-  for (let i = 0; i < lines.length; i += 1) {
-    if (i > 0) {
-      document.execCommand("insertLineBreak");
-    }
-    document.execCommand("insertText", false, lines[i]);
+  if ("value" in composer) {
+    composer.value = nextText;
+    dispatchComposerInputEvents(composer, nextText);
+    return readComposerText(composer).includes(nextText.slice(0, 8));
   }
 
-  composer.dispatchEvent(new InputEvent("input", { bubbles: true, cancelable: true }));
-  return true;
+  if (tryExecInsert(composer, nextText)) {
+    const current = readComposerText(composer);
+    if (current && current.includes(nextText.slice(0, 8))) return true;
+  }
+
+  composer.textContent = nextText;
+  dispatchComposerInputEvents(composer, nextText);
+  return readComposerText(composer).includes(nextText.slice(0, 8));
 }
 
 function clearContentEditable(element) {
@@ -1287,7 +1215,90 @@ function clearContentEditable(element) {
 function getComposerText() {
   const composer = getComposerEditable();
   if (!composer) return "";
+  return readComposerText(composer);
+}
+
+function readComposerText(composer) {
+  if (!composer) return "";
+  if ("value" in composer) return String(composer.value || "").trim();
   return String(composer.innerText || composer.textContent || "").trim();
+}
+
+function dispatchComposerInputEvents(composer, text) {
+  try {
+    composer.dispatchEvent(new InputEvent("beforeinput", { bubbles: true, cancelable: true, data: text, inputType: "insertText" }));
+  } catch (_error) {
+    // Ignore if constructor is blocked by browser.
+  }
+
+  try {
+    composer.dispatchEvent(new InputEvent("input", { bubbles: true, cancelable: true, data: text, inputType: "insertText" }));
+  } catch (_error) {
+    composer.dispatchEvent(new Event("input", { bubbles: true, cancelable: true }));
+  }
+
+  composer.dispatchEvent(new Event("change", { bubbles: true, cancelable: true }));
+  composer.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, cancelable: true, key: "Enter" }));
+}
+
+function tryExecInsert(composer, text) {
+  try {
+    clearContentEditable(composer);
+    const lines = String(text || "").split(/\n/);
+    for (let i = 0; i < lines.length; i += 1) {
+      if (i > 0) {
+        document.execCommand("insertLineBreak");
+      }
+      document.execCommand("insertText", false, lines[i]);
+    }
+    dispatchComposerInputEvents(composer, text);
+    return true;
+  } catch (_error) {
+    return false;
+  }
+}
+
+function getComposerOpenTriggers() {
+  const prioritySelectors = [
+    "button[aria-label*='Message']",
+    "button[aria-label*='message']",
+    "button[data-control-name*='message']",
+    "a[href*='/messaging/compose/']"
+  ];
+
+  const targets = [];
+  prioritySelectors.forEach((selector) => {
+    document.querySelectorAll(selector).forEach((node) => {
+      if (node && isVisible(node)) targets.push(node);
+    });
+  });
+
+  if (targets.length) return dedupeNodes(targets);
+
+  const fallback = Array.from(document.querySelectorAll("button, a")).filter((element) => {
+    const text = String(element.textContent || "").trim().toLowerCase();
+    return (text.includes("message") || text.includes("new message") || text.includes("send message")) && isVisible(element);
+  });
+
+  return dedupeNodes(fallback);
+}
+
+function dedupeNodes(nodes) {
+  return Array.from(new Set(nodes));
+}
+
+async function waitForComposer(timeoutMs = 1200) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const composer = getComposerEditable();
+    if (composer) return composer;
+    await sleep(80);
+  }
+  return null;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function fallbackCopyToClipboard(text) {
