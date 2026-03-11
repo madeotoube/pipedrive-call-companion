@@ -659,6 +659,7 @@ function wireFallbackEvents(drawer) {
       type: "LINKEDIN_LOG_AND_ADVANCE",
       payload: {
         personId,
+        leadId: STATE.fallback.match?.leadId || "",
         profileUrl: STATE.fallback.context?.profileUrl || "",
         sequenceId: STATE.fallback.selectedSequenceId || "manual_template_flow",
         templateId: STATE.fallback.selectedTemplate?.id || "manual",
@@ -945,6 +946,7 @@ function renderMatch(drawer, person, candidates, errorText) {
       renderPaKeyValueCard(matchCard, [
         { label: "Matched", value: `${person.name} (#${person.id})` },
         { label: "Org", value: person.orgName || "N/A" },
+        { label: "Lead", value: STATE.fallback.match?.leadId || "N/A" },
         { label: "DM eligible", value: STATE.fallback.match?.dmEligible ? "Yes" : "No" },
         { label: "Current stage", value: String(STATE.fallback.match?.currentStage || 1) }
       ]);

@@ -94,6 +94,7 @@ function renderMatchCard() {
     renderKeyValueCard(refs.matchCard, [
       { label: "Matched", value: `${match.person.name} (#${match.person.id})` },
       { label: "Org", value: match.person.orgName || "N/A" },
+      { label: "Lead", value: match.leadId || "N/A" },
       { label: "DM eligible", value: match.dmEligible ? "Yes" : "No" },
       { label: "Current stage", value: String(match.currentStage || 1) }
     ]);
@@ -197,6 +198,7 @@ async function onLogAndAdvance() {
     type: "LINKEDIN_LOG_AND_ADVANCE",
     payload: {
       personId: state.match.person.id,
+      leadId: state.match.leadId || "",
       profileUrl: state.linkedinContext?.profileUrl || "",
       sequenceId: state.selectedSequenceId || "manual_template_flow",
       templateId: state.selectedTemplateId || "manual",

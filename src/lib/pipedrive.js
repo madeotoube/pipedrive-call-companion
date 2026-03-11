@@ -238,6 +238,7 @@ async function createLinkedInDmActivity({
   baseOrigin,
   apiToken,
   personId,
+  leadId,
   subject,
   type = "task",
   note,
@@ -256,6 +257,9 @@ async function createLinkedInDmActivity({
     due_date: normalizedDueDate,
     note: note || ""
   };
+  if (leadId) {
+    activityPayload.lead_id = String(leadId);
+  }
 
   return pipedriveRequest({
     baseOrigin,

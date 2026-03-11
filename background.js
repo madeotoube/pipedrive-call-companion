@@ -1598,6 +1598,7 @@ async function handleLinkedInMatchPerson(payload) {
   let dmEligible = false;
   let currentStage = 1;
   let sequenceId = "";
+  let leadId = "";
   let enrichedPerson = null;
 
   if (person) {
@@ -1610,6 +1611,11 @@ async function handleLinkedInMatchPerson(payload) {
     if (backendEligible?.eligible === true) {
       dmEligible = true;
     }
+    leadId = await resolveLeadIdForPerson({
+      baseOrigin,
+      apiToken: options.apiToken,
+      personId: enrichedPerson.id
+    });
   }
 
   return {
@@ -1618,7 +1624,8 @@ async function handleLinkedInMatchPerson(payload) {
     candidates,
     dmEligible,
     currentStage,
-    sequenceId
+    sequenceId,
+    leadId
   };
 }
 
@@ -1651,6 +1658,11 @@ async function handleLinkedInConfirmMatch(payload) {
     apiToken: options.apiToken,
     personId
   });
+  const leadId = await resolveLeadIdForPerson({
+    baseOrigin,
+    apiToken: options.apiToken,
+    personId
+  });
 
   return {
     strategy: "manual_confirm",
@@ -1658,7 +1670,8 @@ async function handleLinkedInConfirmMatch(payload) {
     candidates: [],
     dmEligible: readBooleanField(person?.[options.personLinkedinDmEligibleKey]),
     currentStage: Number(person?.[options.personLinkedinDmStageKey]) || 1,
-    sequenceId: String(person?.[options.personLinkedinDmSequenceIdKey] || "")
+    sequenceId: String(person?.[options.personLinkedinDmSequenceIdKey] || ""),
+    leadId
   };
 }
 
@@ -1775,6 +1788,7 @@ async function handleLinkedInLogAndAdvance(payload) {
   const sequenceId = String(payload.sequenceId || "");
   const templateId = String(payload.templateId || "manual");
   const dmText = String(payload.dmText || "").trim();
+  const payloadLeadId = String(payload.leadId || "").trim();
 
   if (!Number.isFinite(personId) || personId <= 0) {
     throw new Error("Valid personId is required.");
@@ -1785,6 +1799,11 @@ async function handleLinkedInLogAndAdvance(payload) {
   }
 
   const baseOrigin = getBaseOriginFromActiveTabOrFallback();
+  const leadId = payloadLeadId || await resolveLeadIdForPerson({
+    baseOrigin,
+    apiToken: options.apiToken,
+    personId
+  });
   const now = new Date().toISOString();
   const today = now.slice(0, 10);
   const subject = `LinkedIn DM sent (Stage ${currentStage})`;
@@ -1793,6 +1812,7 @@ async function handleLinkedInLogAndAdvance(payload) {
     baseOrigin,
     apiToken: options.apiToken,
     personId,
+    leadId,
     linkedInUrl: profileUrl,
     stage: currentStage,
     sequenceId,
@@ -1808,6 +1828,7 @@ async function handleLinkedInLogAndAdvance(payload) {
       baseOrigin,
       apiToken: options.apiToken,
       personId,
+      leadId,
       subject,
       type: "task",
       dueDate: today,
@@ -1834,10 +1855,45 @@ async function handleLinkedInLogAndAdvance(payload) {
     ok: true,
     nextStage,
     dmEligible: false,
+    leadId: leadId || null,
     noteId: noteResult?.id || null,
     activityId: activityResult?.id || null,
     activityWarning
   };
+}
+
+async function resolveLeadIdForPerson({ baseOrigin, apiToken, personId }) {
+  if (!Number.isFinite(Number(personId)) || Number(personId) <= 0) {
+    return "";
+  }
+
+  const encodedPersonId = encodeURIComponent(String(personId));
+  const leads = await safeFetchPipedriveOr({
+    config: {
+      path: `/api/v1/leads?person_id=${encodedPersonId}&limit=25`,
+      baseOrigin,
+      apiToken,
+      dataIsArray: true
+    },
+    fallback: []
+  });
+
+  if (!Array.isArray(leads) || !leads.length) {
+    return "";
+  }
+
+  const sorted = leads
+    .filter((item) => {
+      const pid = Number(item?.person_id?.value || item?.person_id || 0);
+      if (!Number.isFinite(pid) || pid <= 0) return false;
+      if (pid !== Number(personId)) return false;
+      const status = String(item?.status || "").toLowerCase();
+      return status !== "archived";
+    })
+    .sort((a, b) => toTimestamp(b?.update_time || b?.add_time) - toTimestamp(a?.update_time || a?.add_time));
+
+  if (!sorted.length) return "";
+  return String(sorted[0]?.id || "");
 }
 
 async function fetchDmEligibilityFromBackend(backendBaseUrl, personId) {
