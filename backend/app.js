@@ -361,6 +361,7 @@ function renderAdminHtml() {
         --primary: #4cae4f;
         --primary-dark: #449c47;
         --danger: #b33a3a;
+        --soft: #f8fafc;
       }
       * { box-sizing: border-box; }
       body {
@@ -396,21 +397,11 @@ function renderAdminHtml() {
         margin: 0 0 10px;
         font-size: 13px;
       }
-      textarea {
-        width: 100%;
-        min-height: 560px;
-        border: 1px solid var(--border);
-        border-radius: 8px;
-        padding: 10px;
-        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-        font-size: 12px;
-        line-height: 1.5;
-        resize: vertical;
-      }
       .row {
         display: flex;
         gap: 8px;
         align-items: center;
+        flex-wrap: wrap;
       }
       button {
         border: 1px solid transparent;
@@ -429,12 +420,104 @@ function renderAdminHtml() {
         border-color: var(--border);
         color: var(--text);
       }
+      .btn-danger {
+        background: #fff;
+        border-color: #e7c6c6;
+        color: var(--danger);
+      }
       .status {
         margin-top: 10px;
         font-size: 13px;
       }
       .ok { color: #1f7a3b; }
       .err { color: var(--danger); }
+      .sequences {
+        display: grid;
+        gap: 12px;
+        margin-top: 12px;
+      }
+      .sequence-card {
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: var(--surface);
+        padding: 12px;
+      }
+      .sequence-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 10px;
+      }
+      .sequence-title {
+        margin: 0;
+        font-size: 16px;
+      }
+      .grid {
+        display: grid;
+        gap: 8px;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      .field {
+        display: grid;
+        gap: 4px;
+      }
+      .field-full {
+        grid-column: 1 / -1;
+      }
+      label {
+        font-size: 12px;
+        color: var(--muted);
+        font-weight: 700;
+      }
+      input, textarea {
+        width: 100%;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 8px;
+        font-size: 13px;
+        font-family: "Open Sans", "Segoe UI", Arial, sans-serif;
+      }
+      textarea {
+        min-height: 120px;
+        resize: vertical;
+        line-height: 1.5;
+      }
+      .templates {
+        margin-top: 10px;
+        display: grid;
+        gap: 8px;
+      }
+      .template-card {
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--soft);
+        padding: 10px;
+      }
+      .template-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 8px;
+      }
+      .template-title {
+        margin: 0;
+        font-size: 14px;
+      }
+      .actions {
+        display: flex;
+        gap: 8px;
+        margin-top: 8px;
+        flex-wrap: wrap;
+      }
+      .small {
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .divider {
+        height: 1px;
+        background: var(--border);
+        margin: 10px 0;
+      }
     </style>
   </head>
   <body>
@@ -444,25 +527,267 @@ function renderAdminHtml() {
           <h1>Peak Access Template Admin</h1>
           <div class="row">
             <button id="reloadBtn" class="btn-secondary" type="button">Reload</button>
-            <button id="formatBtn" class="btn-secondary" type="button">Format JSON</button>
+            <button id="addSequenceBtn" class="btn-secondary" type="button">Add Sequence</button>
             <button id="saveBtn" class="btn-primary" type="button">Save</button>
           </div>
         </div>
-        <p class="hint">Edit shared LinkedIn sequences/templates JSON. Changes are saved to <code>backend/data/sequences.json</code>.</p>
-        <textarea id="editor" spellcheck="false"></textarea>
+        <p class="hint">User-friendly editor for shared LinkedIn sequences/templates. You can have multiple sequence options, each with 3+ stages/messages.</p>
+        <div id="sequences" class="sequences"></div>
         <div id="status" class="status"></div>
       </div>
     </div>
     <script>
-      const editor = document.getElementById("editor");
+      const sequencesRoot = document.getElementById("sequences");
       const statusEl = document.getElementById("status");
       const reloadBtn = document.getElementById("reloadBtn");
-      const formatBtn = document.getElementById("formatBtn");
+      const addSequenceBtn = document.getElementById("addSequenceBtn");
       const saveBtn = document.getElementById("saveBtn");
+      let state = { version: 1, updated_at: null, sequences: [] };
+      let localCounter = 0;
 
       function setStatus(msg, ok = true) {
         statusEl.textContent = msg;
         statusEl.className = "status " + (ok ? "ok" : "err");
+      }
+
+      function slugify(value) {
+        return String(value || "")
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-+|-+$/g, "")
+          .slice(0, 48);
+      }
+
+      function nextLocalId(prefix) {
+        localCounter += 1;
+        return prefix + "-" + Date.now() + "-" + localCounter;
+      }
+
+      function ensureTemplateMinimum(sequence) {
+        const templates = Array.isArray(sequence.templates) ? sequence.templates : [];
+        if (templates.length >= 3) return templates;
+
+        const defaults = [
+          { stage: 1, label: "Stage 1 Intro", body: "Hi {{personFirstName}}, thanks for connecting..." },
+          { stage: 2, label: "Stage 2 Follow-up", body: "Hi {{personFirstName}}, following up with one practical idea..." },
+          { stage: 3, label: "Stage 3 Close Loop", body: "Hi {{personFirstName}}, closing the loop on our prior note..." }
+        ];
+
+        for (let i = templates.length; i < 3; i += 1) {
+          const d = defaults[i];
+          templates.push({
+            id: nextLocalId("template"),
+            stage: d.stage,
+            label: d.label,
+            body: d.body
+          });
+        }
+        return templates;
+      }
+
+      function renderAll() {
+        sequencesRoot.innerHTML = "";
+        if (!Array.isArray(state.sequences) || state.sequences.length === 0) {
+          const empty = document.createElement("div");
+          empty.className = "small";
+          empty.textContent = "No sequences yet. Click Add Sequence.";
+          sequencesRoot.appendChild(empty);
+          return;
+        }
+
+        state.sequences.forEach((sequence, sequenceIndex) => {
+          ensureTemplateMinimum(sequence);
+          const card = document.createElement("section");
+          card.className = "sequence-card";
+
+          const head = document.createElement("div");
+          head.className = "sequence-head";
+          const h = document.createElement("h2");
+          h.className = "sequence-title";
+          h.textContent = sequence.name || "Untitled Sequence";
+          const removeSequenceBtn = document.createElement("button");
+          removeSequenceBtn.type = "button";
+          removeSequenceBtn.className = "btn-danger";
+          removeSequenceBtn.textContent = "Remove Sequence";
+          removeSequenceBtn.addEventListener("click", () => {
+            state.sequences.splice(sequenceIndex, 1);
+            renderAll();
+          });
+          head.appendChild(h);
+          head.appendChild(removeSequenceBtn);
+          card.appendChild(head);
+
+          const grid = document.createElement("div");
+          grid.className = "grid";
+
+          grid.appendChild(makeField("Sequence ID", sequence.id || "", (v) => {
+            sequence.id = v;
+          }));
+          grid.appendChild(makeField("Name", sequence.name || "", (v) => {
+            sequence.name = v;
+            h.textContent = v || "Untitled Sequence";
+          }));
+          grid.appendChild(makeField("Recommended Start Stage", String(sequence.recommended_start_stage || 1), (v) => {
+            sequence.recommended_start_stage = Number(v || 1);
+          }, "number"));
+          grid.appendChild(makeField("Description", sequence.description || "", (v) => {
+            sequence.description = v;
+          }));
+
+          card.appendChild(grid);
+          const divider = document.createElement("div");
+          divider.className = "divider";
+          card.appendChild(divider);
+
+          const templatesWrap = document.createElement("div");
+          templatesWrap.className = "templates";
+          sequence.templates.forEach((template, templateIndex) => {
+            templatesWrap.appendChild(renderTemplateCard(sequence, template, sequenceIndex, templateIndex));
+          });
+          card.appendChild(templatesWrap);
+
+          const actions = document.createElement("div");
+          actions.className = "actions";
+          const addTemplateBtn = document.createElement("button");
+          addTemplateBtn.type = "button";
+          addTemplateBtn.className = "btn-secondary";
+          addTemplateBtn.textContent = "Add Stage/Message";
+          addTemplateBtn.addEventListener("click", () => {
+            const nextStage = sequence.templates.reduce((max, t) => Math.max(max, Number(t.stage || 0)), 0) + 1;
+            sequence.templates.push({
+              id: nextLocalId("template"),
+              stage: nextStage,
+              label: "Stage " + nextStage + " Message",
+              body: "Hi {{personFirstName}}, ..."
+            });
+            renderAll();
+          });
+          actions.appendChild(addTemplateBtn);
+          card.appendChild(actions);
+
+          sequencesRoot.appendChild(card);
+        });
+      }
+
+      function renderTemplateCard(sequence, template, sequenceIndex, templateIndex) {
+        const card = document.createElement("article");
+        card.className = "template-card";
+
+        const head = document.createElement("div");
+        head.className = "template-head";
+        const title = document.createElement("h3");
+        title.className = "template-title";
+        title.textContent = template.label || ("Template " + (templateIndex + 1));
+        const removeBtn = document.createElement("button");
+        removeBtn.type = "button";
+        removeBtn.className = "btn-danger";
+        removeBtn.textContent = "Remove";
+        removeBtn.addEventListener("click", () => {
+          sequence.templates.splice(templateIndex, 1);
+          renderAll();
+        });
+        head.appendChild(title);
+        head.appendChild(removeBtn);
+        card.appendChild(head);
+
+        const fields = document.createElement("div");
+        fields.className = "grid";
+
+        fields.appendChild(makeField("Template ID", template.id || "", (v) => {
+          template.id = v;
+        }));
+        fields.appendChild(makeField("Stage", String(template.stage || 1), (v) => {
+          template.stage = Number(v || 1);
+        }, "number"));
+        fields.appendChild(makeField("Title", template.label || "", (v) => {
+          template.label = v;
+          title.textContent = v || ("Template " + (templateIndex + 1));
+        }, "text", true));
+        card.appendChild(fields);
+
+        const bodyField = document.createElement("div");
+        bodyField.className = "field field-full";
+        const bodyLabel = document.createElement("label");
+        bodyLabel.textContent = "Message";
+        const bodyInput = document.createElement("textarea");
+        bodyInput.value = template.body || "";
+        bodyInput.addEventListener("input", (e) => {
+          template.body = e.target.value;
+        });
+        bodyField.appendChild(bodyLabel);
+        bodyField.appendChild(bodyInput);
+        card.appendChild(bodyField);
+
+        const linkRow = document.createElement("div");
+        linkRow.className = "row";
+        const linkInput = document.createElement("input");
+        linkInput.type = "text";
+        linkInput.placeholder = "https://example.com";
+        const insertLinkBtn = document.createElement("button");
+        insertLinkBtn.type = "button";
+        insertLinkBtn.className = "btn-secondary";
+        insertLinkBtn.textContent = "Insert Link";
+        insertLinkBtn.addEventListener("click", () => {
+          const link = String(linkInput.value || "").trim();
+          if (!link) return;
+          const existing = String(template.body || "");
+          template.body = existing + (existing.endsWith("\\n") || existing.length === 0 ? "" : "\\n") + link;
+          bodyInput.value = template.body;
+          linkInput.value = "";
+        });
+        linkRow.appendChild(linkInput);
+        linkRow.appendChild(insertLinkBtn);
+        card.appendChild(linkRow);
+
+        return card;
+      }
+
+      function makeField(labelText, value, onInput, type = "text", full = false) {
+        const wrapper = document.createElement("div");
+        wrapper.className = "field" + (full ? " field-full" : "");
+        const label = document.createElement("label");
+        label.textContent = labelText;
+        const input = document.createElement("input");
+        input.type = type;
+        input.value = value;
+        input.addEventListener("input", (e) => onInput(e.target.value));
+        wrapper.appendChild(label);
+        wrapper.appendChild(input);
+        return wrapper;
+      }
+
+      function normalizeForSave() {
+        const sequences = (state.sequences || []).map((sequence) => {
+          const safeName = String(sequence.name || "").trim() || "New Sequence";
+          const safeId = String(sequence.id || "").trim() || slugify(safeName) || nextLocalId("sequence");
+          const templates = (sequence.templates || []).map((template, idx) => {
+            const label = String(template.label || "").trim() || ("Stage " + Number(template.stage || idx + 1));
+            const stage = Number(template.stage || idx + 1);
+            const id = String(template.id || "").trim()
+              || slugify(safeId + "-" + label)
+              || nextLocalId("template");
+            return {
+              id,
+              stage,
+              label,
+              body: String(template.body || "").trim()
+            };
+          }).filter((t) => t.body);
+
+          return {
+            id: safeId,
+            name: safeName,
+            description: String(sequence.description || "").trim(),
+            recommended_start_stage: Number(sequence.recommended_start_stage || 1),
+            templates
+          };
+        }).filter((s) => s.templates.length > 0);
+
+        return {
+          version: Number(state.version || 1),
+          updated_at: state.updated_at || null,
+          sequences
+        };
       }
 
       async function loadData() {
@@ -473,28 +798,17 @@ function renderAdminHtml() {
           setStatus(data.error || "Failed to load data.", false);
           return;
         }
-        editor.value = JSON.stringify(data.data, null, 2);
+        state = data.data || { version: 1, updated_at: null, sequences: [] };
+        if (!Array.isArray(state.sequences)) {
+          state.sequences = [];
+        }
+        state.sequences.forEach((sequence) => ensureTemplateMinimum(sequence));
+        renderAll();
         setStatus("Loaded.");
       }
 
-      function formatJson() {
-        try {
-          const parsed = JSON.parse(editor.value);
-          editor.value = JSON.stringify(parsed, null, 2);
-          setStatus("Formatted.");
-        } catch (error) {
-          setStatus("Invalid JSON: " + error.message, false);
-        }
-      }
-
       async function saveData() {
-        let parsed;
-        try {
-          parsed = JSON.parse(editor.value);
-        } catch (error) {
-          setStatus("Invalid JSON: " + error.message, false);
-          return;
-        }
+        const parsed = normalizeForSave();
 
         setStatus("Saving...");
         const res = await fetch("/admin/api/sequences", {
@@ -507,12 +821,31 @@ function renderAdminHtml() {
           setStatus(data.error || "Save failed.", false);
           return;
         }
-        editor.value = JSON.stringify(data.data, null, 2);
+        state = data.data;
+        renderAll();
         setStatus("Saved.");
       }
 
+      function addSequence() {
+        const sequenceNumber = (state.sequences?.length || 0) + 1;
+        const sequenceId = nextLocalId("sequence");
+        state.sequences.push({
+          id: sequenceId,
+          name: "Sequence " + sequenceNumber,
+          description: "",
+          recommended_start_stage: 1,
+          templates: [
+            { id: nextLocalId("template"), stage: 1, label: "Stage 1 Intro", body: "Hi {{personFirstName}}, thanks for connecting..." },
+            { id: nextLocalId("template"), stage: 2, label: "Stage 2 Follow-up", body: "Hi {{personFirstName}}, following up..." },
+            { id: nextLocalId("template"), stage: 3, label: "Stage 3 Close Loop", body: "Hi {{personFirstName}}, closing the loop..." }
+          ]
+        });
+        renderAll();
+        setStatus("Added new sequence.");
+      }
+
       reloadBtn.addEventListener("click", loadData);
-      formatBtn.addEventListener("click", formatJson);
+      addSequenceBtn.addEventListener("click", addSequence);
       saveBtn.addEventListener("click", saveData);
       loadData();
     </script>
