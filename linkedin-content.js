@@ -155,28 +155,29 @@ function injectShadowWidget() {
 
     .pa-drawer {
       position: fixed;
-      right: 0;
-      top: 0;
-      width: min(460px, 92vw);
-      height: 100vh;
-      max-height: 100vh;
+      right: 12px;
+      bottom: 12px;
+      top: auto;
+      width: min(430px, calc(100vw - 24px));
+      height: auto;
+      max-height: min(72vh, 760px);
       background: linear-gradient(180deg, #f7faff 0%, var(--pa-bg) 100%);
-      border-left: 1px solid var(--pa-border);
-      border-radius: 0;
-      box-shadow: -18px 0 30px rgba(20, 42, 71, 0.18);
+      border: 1px solid var(--pa-border);
+      border-radius: 14px;
+      box-shadow: 0 18px 34px rgba(20, 42, 71, 0.2);
       overflow: hidden;
       display: flex;
       z-index: 2147483647 !important;
       pointer-events: none;
       flex-direction: column;
-      transform: translateX(100%);
+      transform: translateY(16px);
       opacity: 0;
       visibility: hidden;
-      transition: transform 180ms ease, opacity 180ms ease;
+      transition: transform 170ms ease, opacity 170ms ease;
     }
 
     .pa-drawer-visible {
-      transform: translateX(0);
+      transform: translateY(0);
       opacity: 1;
       visibility: visible;
       pointer-events: auto;
@@ -211,11 +212,11 @@ function injectShadowWidget() {
       min-height: 0;
       overflow: auto;
       overscroll-behavior: contain;
-      padding: 12px 14px 18px;
+      padding: 10px 12px 14px;
       font-size: 14px;
       color: var(--pa-text);
       display: grid;
-      gap: 12px;
+      gap: 10px;
       background: transparent;
     }
 
@@ -281,18 +282,21 @@ function injectShadowWidget() {
     }
 
     .pa-row {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
       gap: 8px;
       min-width: 0;
     }
 
     .pa-row > * {
       min-width: 0;
+      flex: 0 1 auto;
     }
 
     .pa-full {
-      grid-column: span 2;
+      width: 100%;
+      max-width: 100%;
     }
 
     .pa-list {
@@ -341,6 +345,17 @@ function injectShadowWidget() {
       cursor: pointer;
       font-family: var(--pa-font);
       transition: background 140ms ease, transform 140ms ease, box-shadow 140ms ease;
+    }
+
+    .pa-row button {
+      min-width: 120px;
+    }
+
+    .pa-row .pa-input,
+    .pa-row .pa-select,
+    .pa-row .pa-textarea {
+      flex: 1 1 180px;
+      min-width: 0;
     }
 
     .pa-primary {
