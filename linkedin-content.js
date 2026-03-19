@@ -236,12 +236,31 @@ function injectShadowWidget() {
       min-height: 0;
       overflow: hidden;
       overscroll-behavior: contain;
-      padding: 8px 10px 10px;
+      padding: 0;
       font-size: 13px;
       color: var(--pa-text);
+      display: flex;
+      flex-direction: column;
+      background: transparent;
+    }
+
+    .pa-scroll {
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow: auto;
+      padding: 8px 10px 6px;
       display: grid;
       gap: 8px;
-      background: transparent;
+    }
+
+    .pa-sticky-footer {
+      flex: 0 0 auto;
+      padding: 8px 10px 10px;
+      border-top: 1px solid #e6edf5;
+      background: linear-gradient(180deg, rgba(247, 250, 255, 0.96) 0%, rgba(244, 247, 251, 0.98) 100%);
+      backdrop-filter: blur(8px);
+      display: grid;
+      gap: 8px;
     }
 
     .pa-section {
@@ -441,7 +460,9 @@ function injectShadowWidget() {
       background: var(--pa-surface);
       padding: 10px;
       display: grid;
-      gap: 8px;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px 10px;
+      align-items: center;
       box-shadow: 0 6px 16px rgba(20, 42, 71, 0.06);
     }
 
@@ -456,11 +477,29 @@ function injectShadowWidget() {
       font-size: 12px;
       color: var(--pa-text-muted);
       line-height: 1.4;
+      grid-column: 1 / 2;
     }
 
     .pa-confirm-match {
-      justify-self: start;
-      min-width: 210px;
+      justify-self: end;
+      align-self: center;
+      min-width: 0;
+      padding: 7px 10px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      white-space: nowrap;
+      grid-column: 2 / 3;
+      grid-row: 1 / span 2;
+    }
+
+    .pa-confirm-icon {
+      font-size: 11px;
+      line-height: 1;
+    }
+
+    .pa-confirm-label {
+      font-size: 12px;
     }
   `;
 
@@ -554,41 +593,45 @@ function createFallbackDrawer() {
   const body = document.createElement("div");
   body.className = "pa-body";
   body.innerHTML = `
-    <section class="pa-section">
-      <h3>Detected LinkedIn Context</h3>
-      <div id="paContextCard" class="pa-card"></div>
-    </section>
-    <section class="pa-section">
-      <h3>Pipedrive Match</h3>
-      <div id="paMatchCard" class="pa-card"></div>
-      <div class="pa-match-hint">Search for a person if no direct match is found, then confirm the right record to save the LinkedIn URL back to Pipedrive.</div>
-      <div class="pa-row">
-        <input id="paSearchName" class="pa-input" type="text" placeholder="Search Pipedrive person by name" />
-        <button id="paSearchBtn" class="pa-secondary" type="button">Search</button>
-      </div>
-      <div id="paCandidateList" class="pa-list"></div>
-    </section>
-    <section class="pa-section">
-      <h3>Message Templates</h3>
-      <select id="paTemplateSelect" class="pa-select"></select>
-      <input id="paStageInput" class="pa-input" type="number" min="1" step="1" />
-      <div id="paTemplateList" class="pa-list"></div>
-    </section>
-    <section class="pa-section">
-      <h3>Composer</h3>
-      <textarea id="paComposer" class="pa-textarea" placeholder="Template text appears here. You can edit before posting."></textarea>
-      <div class="pa-row">
-        <button id="paPostBtn" class="pa-primary" type="button">Post to LinkedIn</button>
-        <button id="paCopyBtn" class="pa-secondary" type="button">Copy</button>
-      </div>
-    </section>
-    <section class="pa-section">
-      <button id="paLogBtn" class="pa-primary pa-full" type="button">Log & Advance</button>
-    </section>
-    <section class="pa-section">
-      <h3>Status</h3>
-      <div id="paStatus" class="pa-card">Idle.</div>
-    </section>
+    <div class="pa-scroll">
+      <section class="pa-section">
+        <h3>Detected LinkedIn Context</h3>
+        <div id="paContextCard" class="pa-card"></div>
+      </section>
+      <section class="pa-section">
+        <h3>Pipedrive Match</h3>
+        <div id="paMatchCard" class="pa-card"></div>
+        <div class="pa-match-hint">Search for a person if no direct match is found, then confirm the right record to save the LinkedIn URL back to Pipedrive.</div>
+        <div class="pa-row">
+          <input id="paSearchName" class="pa-input" type="text" placeholder="Search Pipedrive person by name" />
+          <button id="paSearchBtn" class="pa-secondary" type="button">Search</button>
+        </div>
+        <div id="paCandidateList" class="pa-list"></div>
+      </section>
+      <section class="pa-section">
+        <h3>Message Templates</h3>
+        <select id="paTemplateSelect" class="pa-select"></select>
+        <input id="paStageInput" class="pa-input" type="number" min="1" step="1" />
+        <div id="paTemplateList" class="pa-list"></div>
+      </section>
+    </div>
+    <div class="pa-sticky-footer">
+      <section class="pa-section">
+        <h3>Composer</h3>
+        <textarea id="paComposer" class="pa-textarea" placeholder="Template text appears here. You can edit before posting."></textarea>
+        <div class="pa-row">
+          <button id="paPostBtn" class="pa-primary" type="button">Post to LinkedIn</button>
+          <button id="paCopyBtn" class="pa-secondary" type="button">Copy</button>
+        </div>
+      </section>
+      <section class="pa-section">
+        <button id="paLogBtn" class="pa-primary pa-full" type="button">Log & Advance</button>
+      </section>
+      <section class="pa-section">
+        <h3>Status</h3>
+        <div id="paStatus" class="pa-card">Idle.</div>
+      </section>
+    </div>
   `;
 
   header.appendChild(brand);
@@ -1089,17 +1132,17 @@ function renderMatch(drawer, person, candidates, errorText) {
     confirm.type = "button";
     confirm.className = "pa-primary pa-confirm-match";
     confirm.setAttribute("data-person-id", String(candidate.id));
-    confirm.textContent = "Confirm Match + Save URL";
+    confirm.innerHTML = '<span class="pa-confirm-icon" aria-hidden="true">✓</span><span class="pa-confirm-label">Confirm + Save</span>';
     confirm.addEventListener("click", async (event) => {
       event.preventDefault();
       confirm.disabled = true;
-      const originalText = confirm.textContent;
-      confirm.textContent = "Saving...";
+      const originalHtml = confirm.innerHTML;
+      confirm.innerHTML = '<span class="pa-confirm-icon" aria-hidden="true">…</span><span class="pa-confirm-label">Saving</span>';
       try {
         await runConfirmMatch(drawer, candidate.id);
       } finally {
         confirm.disabled = false;
-        confirm.textContent = originalText;
+        confirm.innerHTML = originalHtml;
       }
     });
     item.appendChild(name);
