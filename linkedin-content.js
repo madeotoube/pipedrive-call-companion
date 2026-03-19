@@ -381,7 +381,7 @@ function injectShadowWidget() {
 
     .pa-item button, .pa-row button {
       border: 1px solid transparent;
-      border-radius: 4px;
+      border-radius: 10px;
       padding: 9px 11px;
       font-size: 14px;
       font-weight: 700;
