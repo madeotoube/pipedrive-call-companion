@@ -1043,7 +1043,10 @@ function getGmailToken() {
 
 function getOptions() {
   return new Promise((resolve) => {
-    chrome.storage.sync.get(DEFAULT_OPTIONS, (result) => resolve(result));
+    chrome.storage.sync.get(DEFAULT_OPTIONS, async (result) => {
+      const hydrated = await maybeHydrateOptionsFromBackend(result);
+      resolve(hydrated);
+    });
   });
 }
 
@@ -1924,6 +1927,39 @@ async function fetchDmEligibilityFromBackend(backendBaseUrl, personId) {
   }
 }
 
+async function maybeHydrateOptionsFromBackend(result) {
+  const current = { ...DEFAULT_OPTIONS, ...(result || {}) };
+  const backendBaseUrl = normalizeBackendBaseUrl(current.backendBaseUrl);
+  const configSyncSecret = String(current.configSyncSecret || "").trim();
+  const needsHydrate = !String(current.apiToken || "").trim()
+    || !String(current.personLinkedinProfileUrlKey || "").trim()
+    || !String(current.personLinkedinDmStageKey || "").trim();
+
+  if (!needsHydrate) {
+    return current;
+  }
+
+  if (!backendBaseUrl || backendBaseUrl === "http://localhost:8787" || !configSyncSecret) {
+    return current;
+  }
+
+  try {
+    const data = await fetchBackendJson(`${backendBaseUrl}/extension-config`, {
+      headers: { "x-peak-access-secret": configSyncSecret }
+    });
+    const remoteConfig = data?.data;
+    if (!remoteConfig || typeof remoteConfig !== "object") {
+      return current;
+    }
+
+    const next = { ...current, ...remoteConfig, backendBaseUrl };
+    chrome.storage.sync.set(next);
+    return next;
+  } catch (_error) {
+    return current;
+  }
+}
+
 async function forwardToActiveLinkedInTab(message) {
   const tab = await getActiveTab();
   if (!tab?.id || !isLinkedInUrl(tab.url)) {
@@ -1983,8 +2019,14 @@ function normalizeBackendBaseUrl(raw) {
   return value.endsWith("/") ? value.slice(0, -1) : value;
 }
 
-async function fetchBackendJson(url) {
-  const response = await fetch(url, { method: "GET" });
+async function fetchBackendJson(url, init = {}) {
+  const response = await fetch(url, {
+    method: "GET",
+    ...init,
+    headers: {
+      ...(init.headers || {})
+    }
+  });
   const data = await safeJson(response);
 
   if (!response.ok || data?.ok === false) {

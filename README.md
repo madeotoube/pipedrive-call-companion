@@ -64,6 +64,7 @@ Open extension options from `chrome://extensions` -> extension -> **Extension op
 Set at minimum:
 - `Pipedrive API token`
 - `Shared backend base URL` (example: `https://your-service.up.railway.app`)
+- `Config sync secret`
 - Person custom field keys:
   - `personLinkedinProfileUrlKey`
   - `personLinkedinDmSequenceIdKey`
@@ -74,6 +75,11 @@ Set at minimum:
 Optional:
 - `Call disposition field key` and trigger option id
 - No-answer email template JSON overrides
+
+Config sync:
+- `Save` stores config locally in the extension
+- `Pull from backend` restores the centrally managed config from your backend
+- if local settings are empty and both `backendBaseUrl` and `configSyncSecret` are already known, the extension will try to auto-hydrate from backend on next load
 
 Save, then reload extension.
 
@@ -113,6 +119,8 @@ Set environment variables:
 - `GET /sequences/:id`
 - `GET /templates?sequence_id=<id>&stage=<n>`
 - `GET /eligible/:personId`
+- `GET /extension-config`
+- `PUT /extension-config`
 - `POST /pipedrive/webhook`
 - `GET /admin` (basic-auth protected template admin UI)
 - `GET /admin/api/sequences`
@@ -120,7 +128,7 @@ Set environment variables:
 
 ### Online template editor
 
-You can manage shared templates/sequences in-browser:
+You can manage shared templates/sequences and extension config in-browser:
 
 1. Set backend env vars:
    - `ADMIN_USERNAME`
@@ -129,7 +137,14 @@ You can manage shared templates/sequences in-browser:
 3. Open:
    - `https://<your-backend>/admin`
 4. Sign in with basic auth credentials
-5. Edit JSON, then click **Save**
+5. Edit sequences and extension config, then click **Save**
+
+### Config sync auth
+
+Set:
+- `CONFIG_SYNC_SECRET`
+
+The extension uses this secret when calling `GET /extension-config` to restore central config.
 
 ## 5) Pipedrive webhook setup
 

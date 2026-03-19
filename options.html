@@ -119,6 +119,11 @@
       </div>
 
       <div class="field">
+        <label for="configSyncSecret">Config sync secret</label>
+        <input id="configSyncSecret" type="text" autocomplete="off" placeholder="Shared secret for backend config restore" />
+      </div>
+
+      <div class="field">
         <label for="personLinkedinProfileUrlKey">Person custom field key: LinkedIn Profile URL</label>
         <input id="personLinkedinProfileUrlKey" type="text" autocomplete="off" placeholder="e.g. 8af8f7... (Pipedrive field key)" />
       </div>
@@ -178,6 +183,7 @@
 
       <div class="row">
         <button id="save" type="button">Save</button>
+        <button id="pullRemote" type="button">Pull from backend</button>
         <button id="reset" type="button">Reset defaults</button>
       </div>
 
