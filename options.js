@@ -4,7 +4,7 @@ const DEFAULTS = {
   showNotes: true,
   showActivities: true,
   emailTemplatesByStage: "",
-  backendBaseUrl: "https://backend-production-9816.up.railway.app",
+  backendBaseUrl: "https://pipedrive-call-companion-production.up.railway.app",
   configSyncSecret: "cd58bda4728861c653f8c0749315b438162f9d26233b72ef8edec8fb20105ac4",
   personLinkedinProfileUrlKey: "person.linkedin_profile_url",
   personLinkedinDmSequenceIdKey: "person.linkedin_dm_sequence_id",
