@@ -105,8 +105,9 @@ function injectShadowWidget() {
       --pa-border: #d9e1ec;
       --pa-text: #1d2a3a;
       --pa-text-muted: #5f6f86;
-      --pa-primary: #0a5bd8;
-      --pa-primary-strong: #0849ae;
+      --pa-primary: #4cae4f;
+      --pa-primary-strong: #449c47;
+      --pa-accent: #00b4d8;
       --pa-danger: #c2415d;
       --pa-success: #1e8e5a;
     }
@@ -133,7 +134,7 @@ function injectShadowWidget() {
     }
 
     .${SHADOW_WRAPPER_CLASS} button {
-      border: 1px solid #0a4bb0;
+      border: 1px solid var(--pa-primary-strong);
       border-right: 0;
       border-radius: 10px 0 0 10px;
       min-width: 38px;
@@ -144,8 +145,8 @@ function injectShadowWidget() {
       letter-spacing: 0.35px;
       cursor: grab;
       color: #fff;
-      background: linear-gradient(180deg, #0a5bd8 0%, #0849ae 100%);
-      box-shadow: 0 12px 20px rgba(9, 57, 130, 0.3);
+      background: linear-gradient(180deg, var(--pa-primary) 0%, var(--pa-primary-strong) 100%);
+      box-shadow: 0 12px 20px rgba(53, 106, 55, 0.28);
       white-space: nowrap;
     }
 
@@ -199,12 +200,14 @@ function injectShadowWidget() {
     .pa-drawer-header button {
       border: 1px solid var(--pa-border);
       border-radius: 10px;
-      background: var(--pa-surface-soft);
-      color: #334a65;
-      font-size: 14px;
+      background: #f7faf7;
+      color: #2f4f2f;
+      font-size: 12px;
       font-weight: 700;
-      padding: 9px 11px;
+      padding: 0 10px;
+      height: 32px;
       cursor: pointer;
+      font-family: var(--pa-font);
     }
 
     .pa-body {
@@ -338,9 +341,9 @@ function injectShadowWidget() {
 
     .pa-item button, .pa-row button, .pa-top-actions button {
       border: 1px solid transparent;
-      border-radius: 10px;
-      padding: 7px 9px;
-      font-size: 13px;
+      border-radius: 4px;
+      padding: 9px 11px;
+      font-size: 14px;
       font-weight: 700;
       cursor: pointer;
       font-family: var(--pa-font);
@@ -359,23 +362,24 @@ function injectShadowWidget() {
     }
 
     .pa-primary {
-      background: linear-gradient(180deg, var(--pa-primary) 0%, var(--pa-primary-strong) 100%);
+      background: var(--pa-primary);
+      border-color: var(--pa-primary-strong);
       color: #fff;
-      box-shadow: 0 8px 14px rgba(10, 91, 216, 0.22);
+      box-shadow: none;
     }
 
     .pa-secondary {
-      background: var(--pa-surface-soft);
-      color: #334a65;
+      background: #f7faf7;
+      color: #2f4f2f;
       border-color: var(--pa-border);
     }
 
     .pa-primary:hover {
-      transform: translateY(-1px);
+      background: var(--pa-primary-strong);
     }
 
     .pa-secondary:hover {
-      background: #eef4fb;
+      background: #edf6ed;
     }
 
     .pa-top-actions {
@@ -407,6 +411,41 @@ function injectShadowWidget() {
 
     .pa-kv-label {
       font-weight: 700;
+    }
+
+    .pa-match-hint {
+      margin: -2px 0 2px;
+      font-size: 12px;
+      color: var(--pa-text-muted);
+      line-height: 1.4;
+    }
+
+    .pa-candidate-card {
+      border: 1px solid var(--pa-border);
+      border-radius: 10px;
+      background: var(--pa-surface);
+      padding: 10px;
+      display: grid;
+      gap: 8px;
+      box-shadow: 0 6px 16px rgba(20, 42, 71, 0.06);
+    }
+
+    .pa-candidate-name {
+      font-size: 14px;
+      font-weight: 700;
+      color: #21364f;
+      line-height: 1.35;
+    }
+
+    .pa-candidate-meta {
+      font-size: 12px;
+      color: var(--pa-text-muted);
+      line-height: 1.4;
+    }
+
+    .pa-confirm-match {
+      justify-self: start;
+      min-width: 210px;
     }
   `;
 
@@ -500,6 +539,7 @@ function createFallbackDrawer() {
     <section class="pa-section">
       <h3>Pipedrive Match</h3>
       <div id="paMatchCard" class="pa-card"></div>
+      <div class="pa-match-hint">Search for a person if no direct match is found, then confirm the right record to save the LinkedIn URL back to Pipedrive.</div>
       <div class="pa-row">
         <input id="paSearchName" class="pa-input" type="text" placeholder="Search Pipedrive person by name" />
         <button id="paSearchBtn" class="pa-secondary" type="button">Search</button>
@@ -1011,12 +1051,19 @@ function renderMatch(drawer, person, candidates, errorText) {
 
   candidates.forEach((candidate) => {
     const item = document.createElement("div");
-    item.className = "pa-item";
-    item.textContent = `${candidate.name} (#${candidate.id}) ${candidate.orgName ? `- ${candidate.orgName}` : ""}`;
+    item.className = "pa-candidate-card";
+
+    const name = document.createElement("div");
+    name.className = "pa-candidate-name";
+    name.textContent = candidate.name || `Person #${candidate.id}`;
+
+    const meta = document.createElement("div");
+    meta.className = "pa-candidate-meta";
+    meta.textContent = `Pipedrive ID: ${candidate.id}${candidate.orgName ? ` • ${candidate.orgName}` : ""}`;
 
     const confirm = document.createElement("button");
     confirm.type = "button";
-    confirm.className = "pa-secondary pa-confirm-match";
+    confirm.className = "pa-primary pa-confirm-match";
     confirm.setAttribute("data-person-id", String(candidate.id));
     confirm.textContent = "Confirm Match + Save URL";
     confirm.addEventListener("click", async (event) => {
@@ -1031,6 +1078,8 @@ function renderMatch(drawer, person, candidates, errorText) {
         confirm.textContent = originalText;
       }
     });
+    item.appendChild(name);
+    item.appendChild(meta);
     item.appendChild(confirm);
     candidateRoot.appendChild(item);
   });
