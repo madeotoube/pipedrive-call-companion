@@ -1043,7 +1043,10 @@ function getGmailToken() {
 
 function getOptions() {
   return new Promise((resolve) => {
-    chrome.storage.sync.get(DEFAULT_OPTIONS, (result) => resolve(result));
+    chrome.storage.sync.get(DEFAULT_OPTIONS, async (result) => {
+      const hydrated = await maybeHydrateOptionsFromBackend(result);
+      resolve(hydrated);
+    });
   });
 }
 
@@ -1921,6 +1924,36 @@ async function fetchDmEligibilityFromBackend(backendBaseUrl, personId) {
     return await fetchBackendJson(`${base}/eligible/${personId}`);
   } catch (_error) {
     return null;
+  }
+}
+
+async function maybeHydrateOptionsFromBackend(result) {
+  const current = { ...DEFAULT_OPTIONS, ...(result || {}) };
+  const backendBaseUrl = normalizeBackendBaseUrl(current.backendBaseUrl);
+  const needsHydrate = !String(current.apiToken || "").trim()
+    || !String(current.personLinkedinProfileUrlKey || "").trim()
+    || !String(current.personLinkedinDmStageKey || "").trim();
+
+  if (!needsHydrate) {
+    return current;
+  }
+
+  if (!backendBaseUrl || backendBaseUrl === "http://localhost:8787") {
+    return current;
+  }
+
+  try {
+    const data = await fetchBackendJson(`${backendBaseUrl}/extension-config`);
+    const remoteConfig = data?.data;
+    if (!remoteConfig || typeof remoteConfig !== "object") {
+      return current;
+    }
+
+    const next = { ...current, ...remoteConfig, backendBaseUrl };
+    chrome.storage.sync.set(next);
+    return next;
+  } catch (_error) {
+    return current;
   }
 }
 

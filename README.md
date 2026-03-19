@@ -75,6 +75,11 @@ Optional:
 - `Call disposition field key` and trigger option id
 - No-answer email template JSON overrides
 
+Config sync:
+- `Save` now saves locally and also syncs the config to `GET/PUT /extension-config` on your backend
+- `Pull from backend` restores the saved config from your deployed backend
+- if local settings are empty and `backendBaseUrl` is already known, the extension will try to auto-hydrate from backend on next load
+
 Save, then reload extension.
 
 ## 3) Backend setup (local)
@@ -113,6 +118,8 @@ Set environment variables:
 - `GET /sequences/:id`
 - `GET /templates?sequence_id=<id>&stage=<n>`
 - `GET /eligible/:personId`
+- `GET /extension-config`
+- `PUT /extension-config`
 - `POST /pipedrive/webhook`
 - `GET /admin` (basic-auth protected template admin UI)
 - `GET /admin/api/sequences`

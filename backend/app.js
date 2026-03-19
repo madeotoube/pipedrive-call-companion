@@ -14,6 +14,7 @@ export function createApp({ baseDir = process.cwd() } = {}) {
   const ADMIN_PASSWORD = String(process.env.ADMIN_PASSWORD || "").trim();
 
   const sequencesPath = path.join(baseDir, "data", "sequences.json");
+  const extensionConfigPath = path.join(baseDir, "data", "extension-config.json");
   const queueStore = createQueueStore({ baseDir });
   const queueReady = queueStore.init();
 
@@ -141,6 +142,29 @@ export function createApp({ baseDir = process.cwd() } = {}) {
     const item = await queueStore.get(personId);
 
     res.json({ ok: true, person_id: personId, eligible: Boolean(item?.eligible), item });
+  });
+
+  app.get("/extension-config", (_req, res) => {
+    const data = readJson(extensionConfigPath, null);
+    res.json({ ok: true, data });
+  });
+
+  app.put("/extension-config", (req, res) => {
+    const payload = normalizeExtensionConfigPayload(req.body || {});
+    if (!payload.backendBaseUrl) {
+      res.status(400).json({ ok: false, error: "backendBaseUrl is required." });
+      return;
+    }
+
+    try {
+      writeJsonAtomic(extensionConfigPath, {
+        ...payload,
+        updated_at: new Date().toISOString()
+      });
+      res.json({ ok: true, data: payload });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: `Failed to save extension config: ${error.message || String(error)}` });
+    }
   });
 
   app.post("/pipedrive/webhook", async (req, res) => {
@@ -342,6 +366,25 @@ function writeJsonAtomic(filePath, value) {
   const tmpPath = `${filePath}.tmp`;
   fs.writeFileSync(tmpPath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
   fs.renameSync(tmpPath, filePath);
+}
+
+function normalizeExtensionConfigPayload(value) {
+  return {
+    apiToken: String(value.apiToken || "").trim(),
+    backendBaseUrl: String(value.backendBaseUrl || "").trim().replace(/\/+$/, ""),
+    personLinkedinProfileUrlKey: String(value.personLinkedinProfileUrlKey || "").trim(),
+    personLinkedinDmSequenceIdKey: String(value.personLinkedinDmSequenceIdKey || "").trim(),
+    personLinkedinDmStageKey: String(value.personLinkedinDmStageKey || "").trim(),
+    personLinkedinDmLastSentAtKey: String(value.personLinkedinDmLastSentAtKey || "").trim(),
+    personLinkedinDmEligibleKey: String(value.personLinkedinDmEligibleKey || "").trim(),
+    callDispositionFieldKey: String(value.callDispositionFieldKey || "").trim(),
+    callDispositionTriggerOptionId: String(value.callDispositionTriggerOptionId || "").trim(),
+    callDispositionTriggerOptionLabel: String(value.callDispositionTriggerOptionLabel || "").trim(),
+    emailTemplatesByStage: String(value.emailTemplatesByStage || "").trim(),
+    autoOpenPanel: Boolean(value.autoOpenPanel),
+    showNotes: Boolean(value.showNotes),
+    showActivities: Boolean(value.showActivities)
+  };
 }
 
 function renderAdminHtml() {
